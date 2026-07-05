@@ -7,40 +7,43 @@
  *
  * Initialization order:
  *   1. ConfigManager           — config must be ready before anything else reads it
- *   2. EventManager            — event bus ready; needed by BotEngine and BotManager
- *   3. CommandManager          — receives configManager for permissions loading
- *   4. BotEngine               — receives eventManager + commandManager
- *   5. BotManager              — receives configManager, botEngine, eventManager
- *   6. TaskScheduler           — receives botManager; drives task execution every second
- *   7. PluginManager           — receives all four managers; loads plugins last
- *   8. MovementCommands        — registers !goto, !follow, !stop, !look
- *   9. DashboardServer         — REST API; started after all managers are ready
+ *   2. PermissionManager       — must be ready before CommandManager
+ *   3. EventManager            — event bus ready; needed by BotEngine and BotManager
+ *   4. CommandManager          — receives configManager + permissionManager
+ *   5. BotEngine               — receives eventManager + commandManager
+ *   6. BotManager              — receives configManager, botEngine, eventManager
+ *   7. TaskScheduler           — receives botManager; drives task execution every second
+ *   8. PluginManager           — receives all four managers; loads plugins last
+ *   9. MovementCommands        — registers !goto, !follow, !stop, !look
+ *  10. DashboardServer         — REST API; started after all managers are ready
  *
  * Shutdown order (cleanest first):
  *   DashboardServer → TaskScheduler → PluginManager → BotEngine → exit
  */
 
-const ConfigManager          = require('./ConfigManager');
-const PluginManager          = require('./PluginManager');
-const EventManager           = require('./EventManager');
-const CommandManager         = require('./CommandManager');
-const BotManager             = require('./BotManager');
-const BotEngine              = require('../modules/bot/BotEngine');
-const TaskScheduler          = require('../modules/tasks/TaskScheduler');
-const DashboardServer        = require('../dashboard/DashboardServer');
+const ConfigManager            = require('./ConfigManager');
+const PermissionManager        = require('./PermissionManager');
+const PluginManager            = require('./PluginManager');
+const EventManager             = require('./EventManager');
+const CommandManager           = require('./CommandManager');
+const BotManager               = require('./BotManager');
+const BotEngine                = require('../modules/bot/BotEngine');
+const TaskScheduler            = require('../modules/tasks/TaskScheduler');
+const DashboardServer          = require('../dashboard/DashboardServer');
 const registerMovementCommands = require('../commands/MovementCommands');
 
 class Application {
   constructor() {
     // Instantiate each manager; none performs work until initialize() is called
-    this.configManager   = new ConfigManager();
-    this.eventManager    = new EventManager();
-    this.commandManager  = new CommandManager();
-    this.botEngine       = new BotEngine();
-    this.botManager      = new BotManager();
-    this.taskScheduler   = new TaskScheduler();
-    this.pluginManager   = new PluginManager();
-    this.dashboardServer = new DashboardServer(
+    this.configManager     = new ConfigManager();
+    this.permissionManager = new PermissionManager();
+    this.eventManager      = new EventManager();
+    this.commandManager    = new CommandManager();
+    this.botEngine         = new BotEngine();
+    this.botManager        = new BotManager();
+    this.taskScheduler     = new TaskScheduler();
+    this.pluginManager     = new PluginManager();
+    this.dashboardServer   = new DashboardServer(
       this.botManager,
       this.pluginManager,
       this.configManager,
@@ -53,8 +56,9 @@ class Application {
    */
   initialize() {
     this.configManager.initialize();
+    this.permissionManager.initialize();
     this.eventManager.initialize();
-    this.commandManager.initialize(this.configManager);
+    this.commandManager.initialize(this.configManager, this.permissionManager);
     this.botEngine.initialize(this.eventManager, this.commandManager);
     this.botManager.initialize(this.configManager, this.botEngine, this.eventManager);
     this.taskScheduler.initialize(this.botManager);
@@ -64,7 +68,6 @@ class Application {
       this.botManager,
       this.configManager,
     );
-    // Register movement commands after all managers are ready
     registerMovementCommands(this.commandManager, this.botManager);
     this.dashboardServer.initialize();
   }

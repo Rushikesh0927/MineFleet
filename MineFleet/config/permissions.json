@@ -1,21 +1,5 @@
 {
-  "players": {
-    "AdminPlayer": "admin",
-    "OpPlayer": "operator"
-  },
-  "roles": {
-    "admin": {
-      "description": "Full access to all commands and bot controls",
-      "commands": ["*"]
-    },
-    "operator": {
-      "description": "Can control bots but cannot change configuration",
-      "commands": ["bot.start", "bot.stop", "bot.list", "bot.status", "help", "ping", "status"]
-    },
-    "viewer": {
-      "description": "Read-only access to bot status",
-      "commands": ["help", "status"]
-    }
-  },
-  "defaultRole": "viewer"
+  "owner": "RUSHI",
+  "admins": [],
+  "players": {}
 }

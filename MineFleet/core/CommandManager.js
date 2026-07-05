@@ -11,8 +11,8 @@
  *
  * Built-in commands: !help, !ping, !status
  *
- * Authorization is checked against config/permissions.json.
- * Players not listed in the permissions file receive the defaultRole.
+ * Authorization is delegated to PermissionManager.
+ * Permission hierarchy: Owner → Admin → public commands only (help, ping, status).
  */
 
 const COMMAND_PREFIX = '!';
@@ -23,17 +23,18 @@ class CommandManager {
     // Shape: { description: string, handler: (sender, args, bot) => void }
     this.commands = {};
 
-    // Parsed permissions config — set during initialize()
-    this.permissions = null;
+    // Set during initialize()
+    this.permissionManager = null;
   }
 
   /**
-   * Loads permissions from ConfigManager and registers all built-in commands.
+   * Wires PermissionManager and registers all built-in commands.
    *
-   * @param {ConfigManager} configManager — the already-initialized config manager
+   * @param {ConfigManager}     configManager     — kept for API compatibility
+   * @param {PermissionManager} permissionManager — handles all authorization
    */
-  initialize(configManager) {
-    this.permissions = configManager.getPermissions();
+  initialize(configManager, permissionManager) {
+    this.permissionManager = permissionManager;
     this._registerBuiltins();
     console.log('[CommandManager] Initialized');
   }
@@ -84,7 +85,7 @@ class CommandManager {
     }
 
     if (!this._isAuthorized(sender, commandName)) {
-      console.log(`[CommandManager] ${sender} is not authorized to use ${COMMAND_PREFIX}${commandName}`);
+      console.log(`[CommandManager] ${sender} denied: ${COMMAND_PREFIX}${commandName}`);
       bot.chat(`${sender}: You do not have permission to use that command.`);
       return;
     }
@@ -107,30 +108,16 @@ class CommandManager {
   // ---------------------------------------------------------------------------
 
   /**
-   * Determines whether a player is allowed to run a specific command.
-   * Looks up the player's role in permissions.json; falls back to defaultRole.
+   * Delegates authorization to PermissionManager.
+   * Falls back to denying everything if PermissionManager is not set.
    *
    * @param {string} sender      — player's in-game username
    * @param {string} commandName — command name without prefix
    * @returns {boolean}
    */
   _isAuthorized(sender, commandName) {
-    if (!this.permissions) return false;
-
-    // Resolve the player's role
-    const playerRole = (this.permissions.players && this.permissions.players[sender])
-      || this.permissions.defaultRole;
-
-    const role = this.permissions.roles[playerRole];
-    if (!role) return false;
-
-    const allowed = role.commands;
-
-    // Wildcard grants full access
-    if (allowed.includes('*')) return true;
-
-    // Exact command name match
-    return allowed.includes(commandName);
+    if (!this.permissionManager) return false;
+    return this.permissionManager.hasPermission(sender, commandName);
   }
 
   /**
@@ -148,7 +135,7 @@ class CommandManager {
 
     this.register('status', 'Show current bot status', (_sender, _args, bot) => {
       const health = bot.health !== undefined ? bot.health.toFixed(1) : 'N/A';
-      const food   = bot.food   !== undefined ? bot.food            : 'N/A';
+      const food   = bot.food   !== undefined ? bot.food              : 'N/A';
       bot.chat(`Status — Health: ${health} | Food: ${food} | Username: ${bot.username}`);
     });
   }
