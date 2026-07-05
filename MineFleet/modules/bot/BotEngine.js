@@ -6,6 +6,9 @@
  *
  * Responsibilities:
  *   - Create Mineflayer bots from BotProfiles
+ *   - Load mineflayer-pathfinder into every new bot
+ *   - Create and own one MovementManager per bot
+ *   - Tag each bot with bot._minefleetId for command handlers
  *   - Emit platform events (bot:connecting, bot:reconnecting) via EventManager
  *   - Delegate all Mineflayer event logging to EventManager
  *   - Forward chat commands to CommandManager
@@ -13,7 +16,8 @@
  *   - Provide a clean shutdown that disconnects all bots and clears timers
  */
 
-const mineflayer = require('mineflayer');
+const mineflayer       = require('mineflayer');
+const MovementManager  = require('../movement/MovementManager');
 
 const RECONNECT_DELAY_MS = 5000;
 
@@ -21,6 +25,9 @@ class BotEngine {
   constructor() {
     // Active Mineflayer bot instances keyed by bot ID
     this.bots = {};
+
+    // Active MovementManager instances keyed by bot ID
+    this.movementManagers = {};
 
     // Active reconnect timers keyed by bot ID (prevents duplicate timers)
     this.reconnectTimers = {};
@@ -45,9 +52,11 @@ class BotEngine {
   /**
    * Creates a Mineflayer bot from a BotProfile.
    *
-   * Emits bot:connecting, delegates lifecycle event logging to EventManager,
-   * then adds its own "end" listener for reconnect business logic and a "chat"
-   * listener that forwards prefixed messages to CommandManager.
+   * - Tags the bot with bot._minefleetId so command handlers can look up its ID
+   * - Loads mineflayer-pathfinder and wires a MovementManager
+   * - Emits bot:connecting, delegates lifecycle event logging to EventManager
+   * - Adds its own "end" listener for reconnect business logic
+   * - Forwards !-prefixed chat messages to CommandManager
    *
    * Prevents duplicate instances: if a bot with this ID is already active,
    * the call is ignored.
@@ -73,13 +82,22 @@ class BotEngine {
       version:  profile.version,
     });
 
+    // Tag the bot with its platform ID so command handlers can resolve it
+    bot._minefleetId = profile.id;
+
+    // Load pathfinder and initialize MovementManager for this bot
+    const mm = new MovementManager();
+    mm.initialize(bot);
+    this.movementManagers[profile.id] = mm;
+
     // Delegate all lifecycle logging to EventManager (also emits platform events)
     this.eventManager.register(bot, profile);
 
     // --- BotEngine's own end handler (reconnect business logic) -------------
     bot.on('end', () => {
-      // Remove stale instance
+      // Remove stale instances
       delete this.bots[profile.id];
+      delete this.movementManagers[profile.id];
 
       // Clean up EventManager listeners to prevent memory leaks
       this.eventManager.unregister(bot);
@@ -116,6 +134,16 @@ class BotEngine {
   }
 
   /**
+   * Returns the MovementManager for the given bot ID, or null.
+   *
+   * @param {string} id — bot profile ID
+   * @returns {MovementManager|null}
+   */
+  getMovementManager(id) {
+    return this.movementManagers[id] || null;
+  }
+
+  /**
    * Gracefully shuts down all active bots and cancels pending reconnect timers.
    */
   shutdown() {
@@ -135,6 +163,7 @@ class BotEngine {
         // Bot may already be in a disconnected state — safe to ignore
       }
       delete this.bots[id];
+      delete this.movementManagers[id];
     }
   }
 
@@ -155,6 +184,7 @@ class BotEngine {
       this.eventManager.unregister(bot);
       bot.quit();
       delete this.bots[id];
+      delete this.movementManagers[id];
     }
 
     console.log(`[BotEngine] Removed Bot: ${id}`);

@@ -333,6 +333,17 @@ class BotManager {
     return this.getTaskManager(botId).getQueue();
   }
 
+  /**
+   * Returns the MovementManager for the given bot ID via BotEngine, or null.
+   * Used by command handlers and movement tasks.
+   *
+   * @param {string} id — bot profile ID
+   * @returns {MovementManager|null}
+   */
+  getMovementManager(id) {
+    return this.botEngine ? this.botEngine.getMovementManager(id) : null;
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
