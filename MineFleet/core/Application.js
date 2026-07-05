@@ -8,10 +8,13 @@
  * Initialization order:
  *   1. ConfigManager  — config must be ready before anything else reads it
  *   2. PluginManager  — plugins register themselves before the event bus starts
- *   3. EventManager   — event bus ready for managers that emit on startup
- *   4. CommandManager — commands can now listen for events
- *   5. BotEngine      — Mineflayer layer initialized before BotManager needs it
+ *   3. EventManager   — event bus ready; needed by BotEngine
+ *   4. CommandManager — receives configManager for permissions loading
+ *   5. BotEngine      — receives eventManager + commandManager
  *   6. BotManager     — receives configManager + botEngine; starts enabled bots
+ *
+ * Shutdown order (reverse of startup):
+ *   BotEngine.shutdown() → all bots disconnected, timers cleared
  */
 
 const ConfigManager  = require('./ConfigManager');
@@ -33,17 +36,27 @@ class Application {
   }
 
   /**
-   * Starts the platform by initializing every manager in dependency order.
-   * BotEngine is initialized before BotManager so it is ready to receive
-   * createBot() calls during BotManager's startup sequence.
+   * Starts the platform by initializing every manager in dependency order,
+   * threading shared references where needed.
    */
   initialize() {
     this.configManager.initialize();
     this.pluginManager.initialize();
     this.eventManager.initialize();
-    this.commandManager.initialize();
-    this.botEngine.initialize();
+    this.commandManager.initialize(this.configManager);
+    this.botEngine.initialize(this.eventManager, this.commandManager);
     this.botManager.initialize(this.configManager, this.botEngine);
+  }
+
+  /**
+   * Gracefully shuts down the platform.
+   * Disconnects all active bots, clears reconnect timers, then exits.
+   */
+  shutdown() {
+    console.log('MineFleet shutting down...');
+    this.botEngine.shutdown();
+    console.log('Shutdown complete.');
+    process.exit(0);
   }
 }
 

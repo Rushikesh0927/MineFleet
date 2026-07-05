@@ -1,0 +1,154 @@
+Implement the next three MineFleet milestones while preserving the existing architecture.
+
+==========================
+PHASE 3.3 — Auto Reconnect
+==========================
+
+Requirements:
+
+1. Update BotEngine.
+
+2. When the Mineflayer "end" event fires:
+
+- If profile.autoReconnect == true:
+    Wait 5 seconds.
+    Attempt to reconnect.
+
+- If false:
+    Do nothing.
+
+3. Prevent duplicate reconnect timers.
+
+4. Prevent duplicate bot instances.
+
+5. Store reconnect timers internally.
+
+6. Log messages:
+
+[BotEngine] Miner01 reconnecting in 5 seconds...
+[BotEngine] Miner01 reconnect attempt...
+
+==========================
+PHASE 3.4 — Safe Shutdown
+==========================
+
+Requirements:
+
+1. Listen for:
+
+SIGINT
+SIGTERM
+
+2. Gracefully disconnect every active Mineflayer bot.
+
+3. Clear reconnect timers.
+
+4. Save logs if applicable.
+
+5. Print:
+
+MineFleet shutting down...
+
+Disconnecting Miner01...
+
+Shutdown complete.
+
+6. Exit cleanly.
+
+==========================
+PHASE 4 — Event System
+==========================
+
+Create a proper EventManager.
+
+Requirements:
+
+1. Register Mineflayer events through EventManager instead of directly inside BotEngine.
+
+Support at minimum:
+
+login
+spawn
+chat
+message
+end
+kicked
+error
+death
+health
+
+2. EventManager should expose:
+
+register(bot)
+
+unregister(bot)
+
+emit(...)
+
+3. BotEngine should delegate all event registration to EventManager.
+
+4. Keep all event handlers modular.
+
+5. Every event should generate standardized logs.
+
+==========================
+PHASE 5 — Command Engine
+==========================
+
+Requirements:
+
+1. Implement a command parser.
+
+2. Prefix:
+
+!
+
+3. Register commands dynamically.
+
+4. Create built-in commands:
+
+!help
+
+!ping
+
+!status
+
+5. Commands should only work for authorized players from permissions.json.
+
+6. CommandManager should expose:
+
+register()
+
+execute()
+
+unregister()
+
+getCommands()
+
+7. BotEngine should forward chat messages to CommandManager.
+
+8. No movement commands yet.
+
+9. No follow command yet.
+
+10. No mining yet.
+
+==========================
+GENERAL RULES
+==========================
+
+Do NOT modify the existing architecture.
+
+Do NOT rename folders.
+
+Do NOT change class names.
+
+Do NOT change constructor signatures unless absolutely necessary.
+
+Follow the existing coding style.
+
+Document every public method.
+
+Maintain clean logging throughout.
+
+At the end, verify that the application still boots successfully.
