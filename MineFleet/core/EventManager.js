@@ -80,8 +80,9 @@ class EventManager {
     });
 
     bind('kicked', (reason) => {
-      console.log(`[EventManager] ${name} was kicked. Reason: ${reason || 'unknown'}`);
-      this.emit('bot:kicked', { id, username: name, reason: reason || 'unknown' });
+      const reasonText = _readableReason(reason);
+      console.log(`[EventManager] ${name} was kicked. Reason: ${reasonText}`);
+      this.emit('bot:kicked', { id, username: name, reason: reasonText });
     });
 
     bind('error', (err) => {
@@ -145,6 +146,31 @@ class EventManager {
       handler(...args);
     }
   }
+}
+
+/**
+ * Converts a Mineflayer kick reason (which may be a prismarine-chat ChatMessage
+ * object, a plain string, or null/undefined) into a human-readable string.
+ *
+ * Priority:
+ *   1. Falsy            → 'unknown'
+ *   2. Already a string → returned as-is
+ *   3. toString()       → used if it returns something other than '[object Object]'
+ *   4. .text property   → used as fallback for raw ChatComponent objects
+ *   5. JSON.stringify   → last resort
+ *
+ * @param {*} reason
+ * @returns {string}
+ */
+function _readableReason(reason) {
+  if (!reason) return 'unknown';
+  if (typeof reason === 'string') return reason;
+  if (typeof reason.toString === 'function') {
+    const s = reason.toString();
+    if (s !== '[object Object]') return s;
+  }
+  if (reason.text !== undefined) return String(reason.text);
+  return JSON.stringify(reason);
 }
 
 module.exports = EventManager;
