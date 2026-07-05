@@ -3,32 +3,37 @@
  *
  * Manages the lifecycle of all Minecraft bots — creation, connection,
  * reconnection, and shutdown. Acts as the central registry for every
- * active bot instance on the platform.
+ * active bot profile on the platform.
  *
- * During initialization it reads bot definitions from ConfigManager,
- * converts each JSON entry into a BotProfile, and stores them internally.
- * No Mineflayer connections are made here.
+ * During initialization it:
+ *   1. Reads bot definitions from ConfigManager and converts them to BotProfiles.
+ *   2. For every enabled profile, delegates to BotEngine to create the connection.
  */
 
 const BotProfile = require('../modules/bot/BotProfile');
 
 class BotManager {
   constructor() {
-    // Active bot instances keyed by bot ID (populated when bots are started)
-    this.bots = {};
-
     // Loaded BotProfile objects keyed by bot ID
     this.profiles = {};
   }
 
   /**
-   * Reads bot definitions from ConfigManager, converts them to BotProfiles,
-   * and stores them internally.
+   * Loads profiles from config then starts every enabled bot via BotEngine.
    *
    * @param {ConfigManager} configManager — the already-initialized config manager
+   * @param {BotEngine}     botEngine     — the already-initialized bot engine
    */
-  initialize(configManager) {
+  initialize(configManager, botEngine) {
     this.loadProfiles(configManager);
+
+    // Start every profile that is marked enabled
+    for (const profile of this.getProfiles()) {
+      if (profile.enabled) {
+        botEngine.createBot(profile);
+      }
+    }
+
     console.log('[BotManager] Initialized');
   }
 

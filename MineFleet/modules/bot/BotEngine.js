@@ -1,64 +1,103 @@
 /**
  * modules/bot/BotEngine.js
  *
- * BotEngine is the interface layer between the MineFleet platform and
- * the Mineflayer library. It will manage the full lifecycle of individual
- * bot instances — creation, removal, and lookup — without containing any
- * direct Minecraft server connection logic at this stage.
+ * Interface layer between the MineFleet platform and the Mineflayer library.
+ * Manages the full lifecycle of individual bot instances — creation, event
+ * binding, removal, and lookup.
  *
- * Mineflayer is imported here so it is available when connection logic
- * is added in a later phase.
+ * This file is the only place in the codebase that calls mineflayer.createBot().
  */
 
 const mineflayer = require('mineflayer');
 
 class BotEngine {
   constructor() {
-    // Will hold active Mineflayer bot instances keyed by bot ID
+    // Active Mineflayer bot instances keyed by bot ID
     this.bots = {};
-
-    // Reference to the mineflayer library, ready for future use
-    this.mineflayer = mineflayer;
   }
 
   /**
    * Prepares the BotEngine for use.
-   * Future: validate config, set up reconnect policies, etc.
    */
   initialize() {
     console.log('[BotEngine] Initialized');
   }
 
   /**
-   * Creates a new bot instance.
-   * Future: accepts a config object and calls mineflayer.createBot().
+   * Creates a Mineflayer bot from a BotProfile, registers lifecycle events,
+   * and stores the instance internally.
+   *
+   * @param {BotProfile} profile — the bot's configuration profile
    */
-  createBot() {
-    console.log('[BotEngine] Creating Bot');
+  createBot(profile) {
+    console.log(`[BotEngine] Creating Bot: ${profile.username}`);
+
+    const bot = mineflayer.createBot({
+      username: profile.username,
+      host:     profile.host,
+      port:     profile.port,
+      version:  profile.version,
+    });
+
+    // --- Lifecycle events ---------------------------------------------------
+
+    bot.once('login', () => {
+      console.log(`[BotEngine] ${profile.username} logged in.`);
+    });
+
+    bot.once('spawn', () => {
+      console.log(`[BotEngine] ${profile.username} spawned.`);
+    });
+
+    bot.on('end', (reason) => {
+      console.log(`[BotEngine] ${profile.username} disconnected. Reason: ${reason || 'unknown'}`);
+      // Remove the stale instance so it can be recreated on reconnect
+      delete this.bots[profile.id];
+    });
+
+    bot.on('kicked', (reason) => {
+      console.log(`[BotEngine] ${profile.username} kicked. Reason: ${reason || 'unknown'}`);
+    });
+
+    bot.on('error', (err) => {
+      console.log(`[BotEngine] ${profile.username} error. ${err.message || err}`);
+    });
+
+    // Store the live instance
+    this.bots[profile.id] = bot;
   }
 
   /**
-   * Removes an existing bot instance by ID.
-   * Future: gracefully disconnects the bot and cleans up its entry.
+   * Gracefully removes a bot instance by ID, ending its connection.
+   *
+   * @param {string} id — the bot's profile ID
    */
-  removeBot() {
-    console.log('[BotEngine] Removing Bot');
+  removeBot(id) {
+    const bot = this.bots[id];
+    if (bot) {
+      bot.quit();
+      delete this.bots[id];
+    }
+    console.log(`[BotEngine] Removing Bot: ${id}`);
   }
 
   /**
-   * Retrieves a single bot instance by ID.
-   * Future: returns the live mineflayer bot object for the given ID.
+   * Returns the live Mineflayer bot instance for the given ID, or null.
+   *
+   * @param {string} id
+   * @returns {object|null}
    */
-  getBot() {
-    console.log('[BotEngine] Getting Bot');
+  getBot(id) {
+    return this.bots[id] || null;
   }
 
   /**
-   * Returns a list of all currently registered bot IDs.
-   * Future: returns Object.keys(this.bots) with status metadata.
+   * Returns an array of all currently active bot IDs.
+   *
+   * @returns {string[]}
    */
   listBots() {
-    console.log('[BotEngine] Listing Bots');
+    return Object.keys(this.bots);
   }
 }
 
