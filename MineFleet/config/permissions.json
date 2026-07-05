@@ -1,0 +1,17 @@
+{
+  "roles": {
+    "admin": {
+      "description": "Full access to all commands and bot controls",
+      "commands": ["*"]
+    },
+    "operator": {
+      "description": "Can control bots but cannot change configuration",
+      "commands": ["bot.start", "bot.stop", "bot.list", "bot.status"]
+    },
+    "viewer": {
+      "description": "Read-only access to bot status",
+      "commands": ["bot.list", "bot.status"]
+    }
+  },
+  "defaultRole": "viewer"
+}

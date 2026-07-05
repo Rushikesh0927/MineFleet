@@ -1,0 +1,12 @@
+{
+  "bots": [
+    {
+      "id": "bot-1",
+      "username": "MineFleetBot",
+      "host": "localhost",
+      "port": 25565,
+      "version": "1.20.1",
+      "enabled": false
+    }
+  ]
+}

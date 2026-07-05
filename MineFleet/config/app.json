@@ -1,0 +1,7 @@
+{
+  "name": "MineFleet",
+  "version": "0.1.0",
+  "description": "Open Source Minecraft Multi Bot Platform",
+  "logLevel": "info",
+  "timezone": "UTC"
+}
