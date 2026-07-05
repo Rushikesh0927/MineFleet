@@ -14,5 +14,8 @@
     "automation"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "mineflayer": "^4.37.1"
+  }
 }

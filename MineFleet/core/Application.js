@@ -11,6 +11,7 @@
  *   3. EventManager   — event bus ready for managers that emit on startup
  *   4. CommandManager — commands can now listen for events
  *   5. BotManager     — bots start last, after all supporting systems are up
+ *   6. BotEngine      — Mineflayer interface layer, initialized after BotManager
  */
 
 const ConfigManager  = require('./ConfigManager');
@@ -18,6 +19,7 @@ const PluginManager  = require('./PluginManager');
 const EventManager   = require('./EventManager');
 const CommandManager = require('./CommandManager');
 const BotManager     = require('./BotManager');
+const BotEngine      = require('../modules/bot/BotEngine');
 
 class Application {
   constructor() {
@@ -27,6 +29,7 @@ class Application {
     this.eventManager   = new EventManager();
     this.commandManager = new CommandManager();
     this.botManager     = new BotManager();
+    this.botEngine      = new BotEngine();
   }
 
   /**
@@ -38,6 +41,7 @@ class Application {
     this.eventManager.initialize();
     this.commandManager.initialize();
     this.botManager.initialize();
+    this.botEngine.initialize();
   }
 }
 
