@@ -1,19 +1,21 @@
 /**
  * core/BotManager.js
  *
- * Manages the lifecycle and runtime state of all Minecraft bots.
+ * Manages the lifecycle, runtime state, and task queues of all Minecraft bots.
  *
  * Responsibilities:
  *   - Load BotProfiles from ConfigManager
  *   - Start/stop/restart individual bots and all bots at once
  *   - Maintain a runtime record per bot (status, lastSeen, ping, uptime, reconnectCount)
  *   - Subscribe to EventManager platform events to keep runtime status current
+ *   - Own one TaskManager per bot and expose task assignment / query methods
  *
  * Bot statuses:
  *   OFFLINE | CONNECTING | ONLINE | DISCONNECTED | RECONNECTING | ERROR
  */
 
-const BotProfile = require('../modules/bot/BotProfile');
+const BotProfile    = require('../modules/bot/BotProfile');
+const TaskManager   = require('../modules/tasks/TaskManager');
 
 const STATUS = {
   OFFLINE:      'OFFLINE',
@@ -32,6 +34,9 @@ class BotManager {
     // Runtime records keyed by bot ID — kept separate from profile data
     // Shape: { status, lastSeen, connectedAt, ping, reconnectCount }
     this.runtimes = {};
+
+    // Per-bot TaskManager instances keyed by bot ID
+    this.taskManagers = {};
 
     // Stored during initialize() for use in startBot() / restartBot()
     this.botEngine = null;
@@ -67,7 +72,7 @@ class BotManager {
 
   /**
    * Reads every bot entry from ConfigManager, wraps each in a BotProfile,
-   * initializes a runtime record, and stores them internally.
+   * initializes a runtime record and TaskManager, and stores them internally.
    *
    * @param {ConfigManager} configManager
    */
@@ -79,13 +84,15 @@ class BotManager {
       return;
     }
 
-    this.profiles = {};
-    this.runtimes = {};
+    this.profiles     = {};
+    this.runtimes     = {};
+    this.taskManagers = {};
 
     for (const entry of config.bots) {
       const profile = new BotProfile(entry);
-      this.profiles[profile.id] = profile;
-      this.runtimes[profile.id] = this._freshRuntime();
+      this.profiles[profile.id]     = profile;
+      this.runtimes[profile.id]     = this._freshRuntime();
+      this.taskManagers[profile.id] = new TaskManager(profile.id);
     }
 
     const count = Object.keys(this.profiles).length;
@@ -209,6 +216,7 @@ class BotManager {
    * Returns the runtime status object for a single bot, or null if not found.
    * Uptime is calculated on the fly from connectedAt.
    * Ping is read from the live bot instance if available.
+   * Active task name is included if a task is running.
    *
    * @param {string} id
    * @returns {object|null}
@@ -228,6 +236,10 @@ class BotManager {
       ? (liveBot._client.latency ?? rt.ping)
       : rt.ping;
 
+    // Include active task info if one is running
+    const tm         = this.taskManagers[id];
+    const activeTask = tm ? tm.getActive() : null;
+
     return {
       id,
       username:       profile.username,
@@ -235,9 +247,13 @@ class BotManager {
       port:           profile.port,
       status:         rt.status,
       lastSeen:       rt.lastSeen,
-      ping:           ping,
+      ping,
       uptime:         uptimeSeconds,
       reconnectCount: rt.reconnectCount,
+      activeTask:     activeTask
+        ? { id: activeTask.id, name: activeTask.name, state: activeTask.state }
+        : null,
+      queueLength:    tm ? tm.getQueue().length : 0,
     };
   }
 
@@ -248,6 +264,73 @@ class BotManager {
    */
   getStatuses() {
     return Object.keys(this.profiles).map(id => this.getStatus(id));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Task management
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns (or lazily creates) the TaskManager for the given bot ID.
+   *
+   * @param {string} id — bot profile ID
+   * @returns {TaskManager}
+   */
+  getTaskManager(id) {
+    if (!this.taskManagers[id]) {
+      this.taskManagers[id] = new TaskManager(id);
+    }
+    return this.taskManagers[id];
+  }
+
+  /**
+   * Assigns a Task to a specific bot.
+   * If the bot has no active task it starts immediately; otherwise it is queued.
+   *
+   * @param {string} botId
+   * @param {Task}   task
+   */
+  assignTask(botId, task) {
+    if (!this.profiles[botId]) {
+      console.error(`[BotManager] assignTask: unknown bot id '${botId}'`);
+      return;
+    }
+    console.log(`[BotManager] Assigning task "${task.name}" to bot '${botId}'`);
+    this.getTaskManager(botId).assign(task);
+  }
+
+  /**
+   * Cancels the active task for a bot and clears its queue.
+   *
+   * @param {string} botId
+   */
+  cancelTask(botId) {
+    if (!this.profiles[botId]) {
+      console.error(`[BotManager] cancelTask: unknown bot id '${botId}'`);
+      return;
+    }
+    console.log(`[BotManager] Cancelling task for bot '${botId}'`);
+    this.getTaskManager(botId).cancel();
+  }
+
+  /**
+   * Returns the currently active Task for the given bot, or null.
+   *
+   * @param {string} botId
+   * @returns {Task|null}
+   */
+  getCurrentTask(botId) {
+    return this.getTaskManager(botId).getActive();
+  }
+
+  /**
+   * Returns the pending task queue for the given bot.
+   *
+   * @param {string} botId
+   * @returns {Task[]}
+   */
+  getTaskQueue(botId) {
+    return this.getTaskManager(botId).getQueue();
   }
 
   // ---------------------------------------------------------------------------
