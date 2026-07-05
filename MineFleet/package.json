@@ -16,6 +16,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "express": "^5.2.1",
     "mineflayer": "^4.37.1"
   }
 }

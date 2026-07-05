@@ -1,0 +1,243 @@
+Implement MineFleet Version 0.3.0.
+
+The current architecture is COMPLETE and MUST NOT be changed.
+
+Do not rename folders.
+Do not rename classes.
+Do not change constructor signatures unless absolutely necessary.
+Do not remove existing functionality.
+
+====================================================
+PHASE 6 — MULTI BOT MANAGER
+====================================================
+
+Goal:
+MineFleet must support unlimited Minecraft bots simultaneously.
+
+Requirements:
+
+1. BotManager must manage multiple bots.
+
+2. Add methods:
+
+startBot(id)
+
+stopBot(id)
+
+restartBot(id)
+
+startAll()
+
+stopAll()
+
+restartAll()
+
+getStatus(id)
+
+getStatuses()
+
+3. Every BotProfile should have a runtime status:
+
+OFFLINE
+
+CONNECTING
+
+ONLINE
+
+DISCONNECTED
+
+RECONNECTING
+
+ERROR
+
+4. Status must automatically update from Mineflayer events.
+
+5. Store runtime information separately from BotProfile.
+
+6. Runtime information should contain:
+
+status
+
+lastSeen
+
+ping
+
+uptime
+
+reconnectCount
+
+7. Logging examples:
+
+[BotManager] Starting Miner01
+
+[BotManager] Guard01 Online
+
+[BotManager] Builder01 Offline
+
+====================================================
+PHASE 7 — PLUGIN SYSTEM
+====================================================
+
+Goal:
+
+Plugins must extend MineFleet without modifying Core.
+
+Create:
+
+plugins/
+
+PluginLoader
+
+PluginBase
+
+PluginContext
+
+Requirements:
+
+Plugin lifecycle:
+
+load()
+
+enable()
+
+disable()
+
+unload()
+
+Plugins receive:
+
+EventManager
+
+CommandManager
+
+BotManager
+
+ConfigManager
+
+Plugin API must allow:
+
+Register commands
+
+Listen to events
+
+Access bot status
+
+Create an example plugin:
+
+ServerInfoPlugin
+
+It should register:
+
+!server
+
+which returns:
+
+Server Name
+
+Online Bots
+
+Version
+
+Do NOT implement mining plugins yet.
+
+====================================================
+PHASE 8 — DASHBOARD BACKEND
+====================================================
+
+Goal:
+
+Create REST API only.
+
+No frontend.
+
+Install Express.
+
+Create:
+
+DashboardServer.js
+
+Requirements:
+
+Start Express.
+
+Default port:
+
+3000
+
+Routes:
+
+GET /
+
+Returns:
+
+MineFleet Dashboard API
+
+GET /health
+
+Returns:
+
+status
+
+uptime
+
+version
+
+GET /api/bots
+
+Returns JSON array of every bot.
+
+GET /api/bots/:id
+
+Returns one bot.
+
+GET /api/plugins
+
+Returns plugins.
+
+GET /api/config
+
+Returns application configuration.
+
+Return JSON only.
+
+No HTML.
+
+====================================================
+GENERAL REQUIREMENTS
+====================================================
+
+Keep logging consistent.
+
+Document every public method.
+
+Do not duplicate code.
+
+Do not break existing architecture.
+
+Verify startup after implementation.
+
+Application should still boot cleanly.
+
+====================================================
+FINAL VERIFICATION
+====================================================
+
+After implementation verify:
+
+✓ Config loads
+
+✓ Plugins load
+
+✓ Dashboard starts
+
+✓ BotManager initializes
+
+✓ EventManager initializes
+
+✓ CommandManager initializes
+
+✓ REST API starts
+
+✓ Existing bot connection still works
+
+✓ No regressions

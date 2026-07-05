@@ -6,6 +6,7 @@
  *
  * Responsibilities:
  *   - Create Mineflayer bots from BotProfiles
+ *   - Emit platform events (bot:connecting, bot:reconnecting) via EventManager
  *   - Delegate all Mineflayer event logging to EventManager
  *   - Forward chat commands to CommandManager
  *   - Handle auto-reconnect with duplicate-safe timers
@@ -31,7 +32,6 @@ class BotEngine {
 
   /**
    * Stores manager references for use in createBot().
-   * Sets up OS signal handlers for graceful shutdown.
    *
    * @param {EventManager}   eventManager   — the initialized EventManager
    * @param {CommandManager} commandManager — the initialized CommandManager
@@ -45,9 +45,9 @@ class BotEngine {
   /**
    * Creates a Mineflayer bot from a BotProfile.
    *
-   * Delegates all lifecycle event logging to EventManager, then adds its
-   * own "end" listener for reconnect business logic and a "chat" listener
-   * that forwards prefixed messages to CommandManager.
+   * Emits bot:connecting, delegates lifecycle event logging to EventManager,
+   * then adds its own "end" listener for reconnect business logic and a "chat"
+   * listener that forwards prefixed messages to CommandManager.
    *
    * Prevents duplicate instances: if a bot with this ID is already active,
    * the call is ignored.
@@ -63,6 +63,9 @@ class BotEngine {
 
     console.log(`[BotEngine] Creating Bot: ${profile.username}`);
 
+    // Notify the platform that a connection is being attempted
+    this.eventManager.emit('bot:connecting', { id: profile.id, username: profile.username });
+
     const bot = mineflayer.createBot({
       username: profile.username,
       host:     profile.host,
@@ -70,10 +73,10 @@ class BotEngine {
       version:  profile.version,
     });
 
-    // Delegate all lifecycle logging to EventManager
+    // Delegate all lifecycle logging to EventManager (also emits platform events)
     this.eventManager.register(bot, profile);
 
-    // --- BotEngine's own end handler (business logic, not logging) ----------
+    // --- BotEngine's own end handler (reconnect business logic) -------------
     bot.on('end', () => {
       // Remove stale instance
       delete this.bots[profile.id];
@@ -86,6 +89,9 @@ class BotEngine {
         if (this.reconnectTimers[profile.id]) return;
 
         console.log(`[BotEngine] ${profile.username} reconnecting in ${RECONNECT_DELAY_MS / 1000} seconds...`);
+
+        // Notify BotManager so it can update status to RECONNECTING
+        this.eventManager.emit('bot:reconnecting', { id: profile.id, username: profile.username });
 
         this.reconnectTimers[profile.id] = setTimeout(() => {
           delete this.reconnectTimers[profile.id];
@@ -111,7 +117,6 @@ class BotEngine {
 
   /**
    * Gracefully shuts down all active bots and cancels pending reconnect timers.
-   * Logs each bot as it is disconnected.
    */
   shutdown() {
     // Cancel all pending reconnect timers first to prevent new connections
@@ -122,7 +127,6 @@ class BotEngine {
 
     // Disconnect every live bot
     for (const [id, bot] of Object.entries(this.bots)) {
-      // Determine username from bot object; fall back to ID
       const name = bot.username || id;
       console.log(`Disconnecting ${name}...`);
       try {

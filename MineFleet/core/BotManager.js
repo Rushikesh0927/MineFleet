@@ -1,45 +1,73 @@
 /**
  * core/BotManager.js
  *
- * Manages the lifecycle of all Minecraft bots — creation, connection,
- * reconnection, and shutdown. Acts as the central registry for every
- * active bot profile on the platform.
+ * Manages the lifecycle and runtime state of all Minecraft bots.
  *
- * During initialization it:
- *   1. Reads bot definitions from ConfigManager and converts them to BotProfiles.
- *   2. For every enabled profile, delegates to BotEngine to create the connection.
+ * Responsibilities:
+ *   - Load BotProfiles from ConfigManager
+ *   - Start/stop/restart individual bots and all bots at once
+ *   - Maintain a runtime record per bot (status, lastSeen, ping, uptime, reconnectCount)
+ *   - Subscribe to EventManager platform events to keep runtime status current
+ *
+ * Bot statuses:
+ *   OFFLINE | CONNECTING | ONLINE | DISCONNECTED | RECONNECTING | ERROR
  */
 
 const BotProfile = require('../modules/bot/BotProfile');
 
+const STATUS = {
+  OFFLINE:      'OFFLINE',
+  CONNECTING:   'CONNECTING',
+  ONLINE:       'ONLINE',
+  DISCONNECTED: 'DISCONNECTED',
+  RECONNECTING: 'RECONNECTING',
+  ERROR:        'ERROR',
+};
+
 class BotManager {
   constructor() {
-    // Loaded BotProfile objects keyed by bot ID
+    // BotProfile objects keyed by bot ID
     this.profiles = {};
+
+    // Runtime records keyed by bot ID — kept separate from profile data
+    // Shape: { status, lastSeen, connectedAt, ping, reconnectCount }
+    this.runtimes = {};
+
+    // Stored during initialize() for use in startBot() / restartBot()
+    this.botEngine = null;
   }
 
   /**
-   * Loads profiles from config then starts every enabled bot via BotEngine.
+   * Loads profiles, wires EventManager status listeners, and starts all
+   * enabled bots.
    *
-   * @param {ConfigManager} configManager — the already-initialized config manager
-   * @param {BotEngine}     botEngine     — the already-initialized bot engine
+   * @param {ConfigManager}  configManager
+   * @param {BotEngine}      botEngine
+   * @param {EventManager}   eventManager
    */
-  initialize(configManager, botEngine) {
+  initialize(configManager, botEngine, eventManager) {
+    this.botEngine = botEngine;
+
     this.loadProfiles(configManager);
+    this._subscribeToEvents(eventManager);
 
     // Start every profile that is marked enabled
     for (const profile of this.getProfiles()) {
       if (profile.enabled) {
-        botEngine.createBot(profile);
+        this.startBot(profile.id);
       }
     }
 
     console.log('[BotManager] Initialized');
   }
 
+  // ---------------------------------------------------------------------------
+  // Profile management
+  // ---------------------------------------------------------------------------
+
   /**
    * Reads every bot entry from ConfigManager, wraps each in a BotProfile,
-   * and stores it in this.profiles. Logs how many profiles were loaded.
+   * initializes a runtime record, and stores them internally.
    *
    * @param {ConfigManager} configManager
    */
@@ -51,12 +79,13 @@ class BotManager {
       return;
     }
 
-    // Reset profiles before (re)loading
     this.profiles = {};
+    this.runtimes = {};
 
     for (const entry of config.bots) {
       const profile = new BotProfile(entry);
       this.profiles[profile.id] = profile;
+      this.runtimes[profile.id] = this._freshRuntime();
     }
 
     const count = Object.keys(this.profiles).length;
@@ -64,7 +93,7 @@ class BotManager {
   }
 
   /**
-   * Returns the BotProfile for the given bot ID, or null if not found.
+   * Returns the BotProfile for the given ID, or null.
    *
    * @param {string} id
    * @returns {BotProfile|null}
@@ -80,6 +109,223 @@ class BotManager {
    */
   getProfiles() {
     return Object.values(this.profiles);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bot lifecycle
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Starts a single bot by profile ID.
+   * Sets its status to CONNECTING, then delegates to BotEngine.
+   *
+   * @param {string} id
+   */
+  startBot(id) {
+    const profile = this.profiles[id];
+    if (!profile) {
+      console.error(`[BotManager] ERROR: No profile found for id '${id}'`);
+      return;
+    }
+
+    console.log(`[BotManager] Starting ${profile.username}`);
+    this._setStatus(id, STATUS.CONNECTING);
+    this.botEngine.createBot(profile);
+  }
+
+  /**
+   * Stops a single bot by profile ID.
+   *
+   * @param {string} id
+   */
+  stopBot(id) {
+    const profile = this.profiles[id];
+    if (!profile) {
+      console.error(`[BotManager] ERROR: No profile found for id '${id}'`);
+      return;
+    }
+
+    console.log(`[BotManager] Stopping ${profile.username}`);
+    this.botEngine.removeBot(id);
+    this._setStatus(id, STATUS.OFFLINE);
+    console.log(`[BotManager] ${profile.username} Offline`);
+  }
+
+  /**
+   * Restarts a single bot by profile ID.
+   *
+   * @param {string} id
+   */
+  restartBot(id) {
+    const profile = this.profiles[id];
+    if (!profile) {
+      console.error(`[BotManager] ERROR: No profile found for id '${id}'`);
+      return;
+    }
+
+    console.log(`[BotManager] Restarting ${profile.username}`);
+    this.botEngine.removeBot(id);
+    this._setStatus(id, STATUS.OFFLINE);
+
+    // Small delay to allow clean disconnect before reconnecting
+    setTimeout(() => this.startBot(id), 1000);
+  }
+
+  /**
+   * Starts all loaded bot profiles.
+   */
+  startAll() {
+    console.log('[BotManager] Starting all bots...');
+    for (const id of Object.keys(this.profiles)) {
+      this.startBot(id);
+    }
+  }
+
+  /**
+   * Stops all active bots.
+   */
+  stopAll() {
+    console.log('[BotManager] Stopping all bots...');
+    for (const id of Object.keys(this.profiles)) {
+      this.stopBot(id);
+    }
+  }
+
+  /**
+   * Restarts all loaded bots.
+   */
+  restartAll() {
+    console.log('[BotManager] Restarting all bots...');
+    for (const id of Object.keys(this.profiles)) {
+      this.restartBot(id);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Status & runtime
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the runtime status object for a single bot, or null if not found.
+   * Uptime is calculated on the fly from connectedAt.
+   * Ping is read from the live bot instance if available.
+   *
+   * @param {string} id
+   * @returns {object|null}
+   */
+  getStatus(id) {
+    const rt      = this.runtimes[id];
+    const profile = this.profiles[id];
+    if (!rt || !profile) return null;
+
+    const uptimeSeconds = rt.connectedAt
+      ? Math.floor((Date.now() - rt.connectedAt) / 1000)
+      : null;
+
+    // Try to read live ping from Mineflayer's internal client
+    const liveBot = this.botEngine ? this.botEngine.getBot(id) : null;
+    const ping    = liveBot && liveBot._client
+      ? (liveBot._client.latency ?? rt.ping)
+      : rt.ping;
+
+    return {
+      id,
+      username:       profile.username,
+      host:           profile.host,
+      port:           profile.port,
+      status:         rt.status,
+      lastSeen:       rt.lastSeen,
+      ping:           ping,
+      uptime:         uptimeSeconds,
+      reconnectCount: rt.reconnectCount,
+    };
+  }
+
+  /**
+   * Returns an array of runtime status objects for every loaded profile.
+   *
+   * @returns {object[]}
+   */
+  getStatuses() {
+    return Object.keys(this.profiles).map(id => this.getStatus(id));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Creates a blank runtime record for a newly loaded profile.
+   *
+   * @returns {object}
+   */
+  _freshRuntime() {
+    return {
+      status:         STATUS.OFFLINE,
+      lastSeen:       null,
+      connectedAt:    null,
+      ping:           null,
+      reconnectCount: 0,
+    };
+  }
+
+  /**
+   * Updates the status field of a bot's runtime record.
+   *
+   * @param {string} id
+   * @param {string} status — one of the STATUS constants
+   */
+  _setStatus(id, status) {
+    const rt = this.runtimes[id];
+    if (!rt) return;
+    rt.status = status;
+  }
+
+  /**
+   * Subscribes to platform-level EventManager events to keep runtime
+   * status records automatically in sync with Mineflayer lifecycle.
+   *
+   * @param {EventManager} eventManager
+   */
+  _subscribeToEvents(eventManager) {
+    eventManager.on('bot:connecting', ({ id }) => {
+      this._setStatus(id, STATUS.CONNECTING);
+    });
+
+    eventManager.on('bot:login', ({ id, username }) => {
+      const rt = this.runtimes[id];
+      if (rt) {
+        rt.status      = STATUS.ONLINE;
+        rt.connectedAt = Date.now();
+      }
+      console.log(`[BotManager] ${username} Online`);
+    });
+
+    eventManager.on('bot:end', ({ id, username }) => {
+      const rt = this.runtimes[id];
+      if (rt) {
+        rt.status      = STATUS.DISCONNECTED;
+        rt.lastSeen    = new Date().toISOString();
+        rt.connectedAt = null;
+      }
+      console.log(`[BotManager] ${username} Offline`);
+    });
+
+    eventManager.on('bot:kicked', ({ id }) => {
+      this._setStatus(id, STATUS.DISCONNECTED);
+    });
+
+    eventManager.on('bot:error', ({ id }) => {
+      this._setStatus(id, STATUS.ERROR);
+    });
+
+    eventManager.on('bot:reconnecting', ({ id }) => {
+      const rt = this.runtimes[id];
+      if (rt) {
+        rt.status = STATUS.RECONNECTING;
+        rt.reconnectCount += 1;
+      }
+    });
   }
 }
 
