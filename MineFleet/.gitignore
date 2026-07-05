@@ -1,0 +1,31 @@
+# .gitignore
+# Specifies intentionally untracked files to ignore in Git.
+
+# Dependencies
+node_modules/
+
+# Environment variables (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/*.log
+*.log
+npm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+
+# Build output
+dist/
+build/
