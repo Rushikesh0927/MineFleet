@@ -49,6 +49,14 @@ class Task {
 
     /** @type {Date} */
     this.createdAt = new Date();
+
+    /**
+     * When true, this task can be immediately replaced by another interruptible
+     * task without waiting for the current task to finish.
+     * Set to true in movement task subclasses.
+     * @type {boolean}
+     */
+    this.interruptible = false;
   }
 
   /**

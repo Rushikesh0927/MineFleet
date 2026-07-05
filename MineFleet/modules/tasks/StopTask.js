@@ -16,7 +16,8 @@ class StopTask extends Task {
    */
   constructor(movementManager, priority = 10) {
     super('stop()', priority);
-    this.mm = movementManager;
+    this.mm            = movementManager;
+    this.interruptible = true;
   }
 
   /**

@@ -5,10 +5,18 @@
  *
  * Rules:
  *   - Only one task may be RUNNING at a time (the "active" slot).
- *   - Additional tasks are pushed into a FIFO queue.
+ *   - Additional tasks are pushed into a FIFO queue sorted by priority.
  *   - When the active task reaches a terminal state, the TaskScheduler calls
  *     advance() to dequeue and start the next pending task automatically.
- *   - Tasks in the queue are sorted by priority (higher first) on insertion.
+ *
+ * Interruptible tasks (movement):
+ *   - Movement tasks set task.interruptible = true.
+ *   - When a new interruptible task is assigned while another interruptible
+ *     task is active, the active task is cancelled immediately and the new
+ *     one starts right away — it is never placed in the queue.
+ *   - This ensures !stop, !goto, !follow, !look always take effect instantly
+ *     regardless of what movement the bot is currently performing.
+ *   - Non-movement tasks are unaffected and continue to queue normally.
  */
 
 const Task = require('./Task');
@@ -31,9 +39,15 @@ class TaskManager {
   /**
    * Assigns a task to this bot.
    *
-   * If no task is active the new task is started immediately.
-   * Otherwise it is inserted into the queue in priority order
-   * (higher priority tasks run first; equal-priority tasks are FIFO).
+   * Interruptible path (movement tasks):
+   *   If the incoming task is interruptible AND an interruptible task is
+   *   already active, the active task is cancelled immediately and the new
+   *   task starts — no queuing.
+   *
+   * Normal path:
+   *   If no task is active, start immediately.
+   *   Otherwise insert into the queue in priority order (higher first; FIFO
+   *   for equal priority).
    *
    * @param {Task} task
    */
@@ -43,6 +57,17 @@ class TaskManager {
       return;
     }
 
+    // --- Interruptible (movement) path -------------------------------------
+    if (task.interruptible && this.activeTask && this.activeTask.interruptible) {
+      console.log(`[TaskManager:${this.botId}] Interrupting movement task: ${this.activeTask.name}`);
+      this.activeTask.stop();   // calls mm.stop() via the task's own stop() override
+      this.activeTask = null;
+      console.log(`[TaskManager:${this.botId}] Starting movement task: ${task.name}`);
+      this._activate(task);
+      return;
+    }
+
+    // --- Normal path -------------------------------------------------------
     if (!this.activeTask) {
       this._activate(task);
     } else {
@@ -71,10 +96,13 @@ class TaskManager {
   }
 
   /**
-   * Dequeues the next pending task and starts it.
    * Called by TaskScheduler when the active task reaches a terminal state.
+   * Logs movement task completion, then dequeues and starts the next task.
    */
   advance() {
+    if (this.activeTask && this.activeTask.interruptible) {
+      console.log(`[TaskManager:${this.botId}] Movement task completed: ${this.activeTask.name}`);
+    }
     this.activeTask = null;
 
     if (this.queue.length === 0) return;

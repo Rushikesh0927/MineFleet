@@ -24,6 +24,7 @@ class LookAtTask extends Task {
     this.y  = y;
     this.z  = z;
     this.mm = movementManager;
+    this.interruptible = true;
   }
 
   /**

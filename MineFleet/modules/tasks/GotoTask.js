@@ -25,6 +25,7 @@ class GotoTask extends Task {
     this.y  = y;
     this.z  = z;
     this.mm = movementManager;
+    this.interruptible = true;
 
     // Used to detect when movement actually begins so we don't complete early
     this._started = false;

@@ -23,10 +23,11 @@ class FollowTask extends Task {
   constructor(entity, entityName, movementManager, distance = 2, priority = 0) {
     super(`follow(${entityName})`, priority);
 
-    this.entity     = entity;
-    this.entityName = entityName;
-    this.mm         = movementManager;
-    this.distance   = distance;
+    this.entity        = entity;
+    this.entityName    = entityName;
+    this.mm            = movementManager;
+    this.distance      = distance;
+    this.interruptible = true;
   }
 
   /**
