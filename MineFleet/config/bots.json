@@ -2,7 +2,43 @@
   "bots": [
     {
       "id": "bot-1",
-      "username": "MineFleetBot",
+      "username": "MineFleetBot1",
+      "host": "rushi161928.aternos.me",
+      "port": 17552,
+      "version": "1.21.1",
+      "enabled": true,
+      "autoReconnect": true
+    },
+    {
+      "id": "bot-2",
+      "username": "MineFleetBot2",
+      "host": "rushi161928.aternos.me",
+      "port": 17552,
+      "version": "1.21.1",
+      "enabled": true,
+      "autoReconnect": true
+    },
+    {
+      "id": "bot-3",
+      "username": "MineFleetBot3",
+      "host": "rushi161928.aternos.me",
+      "port": 17552,
+      "version": "1.21.1",
+      "enabled": true,
+      "autoReconnect": true
+    },
+    {
+      "id": "bot-4",
+      "username": "MineFleetBot4",
+      "host": "rushi161928.aternos.me",
+      "port": 17552,
+      "version": "1.21.1",
+      "enabled": true,
+      "autoReconnect": true
+    },
+    {
+      "id": "bot-5",
+      "username": "MineFleetBot5",
       "host": "rushi161928.aternos.me",
       "port": 17552,
       "version": "1.21.1",
