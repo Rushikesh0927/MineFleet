@@ -10,7 +10,7 @@
  *   2. PluginManager  — plugins register themselves before the event bus starts
  *   3. EventManager   — event bus ready for managers that emit on startup
  *   4. CommandManager — commands can now listen for events
- *   5. BotManager     — bots start last, after all supporting systems are up
+ *   5. BotManager     — receives configManager so it can load bot profiles
  *   6. BotEngine      — Mineflayer interface layer, initialized after BotManager
  */
 
@@ -34,13 +34,14 @@ class Application {
 
   /**
    * Starts the platform by initializing every manager in dependency order.
+   * ConfigManager is passed to BotManager so it can read bot profiles.
    */
   initialize() {
     this.configManager.initialize();
     this.pluginManager.initialize();
     this.eventManager.initialize();
     this.commandManager.initialize();
-    this.botManager.initialize();
+    this.botManager.initialize(this.configManager);
     this.botEngine.initialize();
   }
 }
