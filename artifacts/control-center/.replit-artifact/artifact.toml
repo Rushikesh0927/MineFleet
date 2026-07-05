@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "MineFleet Control Center"
+version = "1.0.0"
+id = "artifacts/control-center"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19463
+
+[services.development]
+run = "pnpm --filter @workspace/control-center run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/control-center", "run", "build" ]
+publicDir = "artifacts/control-center/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19463"
+BASE_PATH = "/"

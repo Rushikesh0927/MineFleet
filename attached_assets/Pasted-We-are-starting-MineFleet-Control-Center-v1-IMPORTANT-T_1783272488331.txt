@@ -1,0 +1,260 @@
+We are starting MineFleet Control Center v1.
+
+IMPORTANT
+
+This is NOT just a dashboard.
+
+This is the primary control interface for MineFleet.
+
+The backend architecture is complete and MUST NOT be changed.
+
+Do NOT modify:
+
+- BotEngine
+- BotManager
+- TaskManager
+- Scheduler
+- Plugin system
+- PermissionManager
+- REST APIs
+
+Only build the frontend and extend the backend with NEW REST endpoints where required.
+
+==========================================================
+GOAL
+==========================================================
+
+Create a modern web application called
+
+MineFleet Control Center
+
+Technology:
+
+- React
+- Vite
+- TailwindCSS
+- React Router
+
+Dark theme.
+
+Responsive.
+
+Professional UI similar to GitHub / Grafana / VSCode.
+
+==========================================================
+LAYOUT
+==========================================================
+
+Sidebar
+
+- Overview
+- Bots
+- Tasks
+- Fleets
+- Plugins
+- Logs
+- Settings
+
+Top Bar
+
+MineFleet Control Center
+
+Connection status
+
+Version
+
+Online Bots
+
+Server Health
+
+==========================================================
+OVERVIEW PAGE
+==========================================================
+
+Display live information
+
+Cards
+
+Total Bots
+
+Online Bots
+
+Offline Bots
+
+Running Tasks
+
+Loaded Plugins
+
+Uptime
+
+Recent Activity
+
+Live updates every 2 seconds.
+
+==========================================================
+BOTS PAGE
+==========================================================
+
+Each bot is displayed as a card.
+
+Show
+
+Internal ID
+
+Username
+
+Display Name (future)
+
+Status
+
+Health
+
+Food
+
+Current Task
+
+Position
+
+Reconnect
+
+Buttons
+
+Connect
+
+Disconnect
+
+Restart
+
+Edit
+
+Delete
+
+Clone
+
+Open
+
+==========================================================
+BOT DETAILS PAGE
+==========================================================
+
+Clicking a bot opens
+
+General Information
+
+Current Task
+
+Health
+
+Food
+
+Position
+
+Inventory (placeholder)
+
+Movement Status
+
+Recent Logs
+
+No controls yet.
+
+==========================================================
+TASKS PAGE
+==========================================================
+
+Show
+
+Running Tasks
+
+Queued Tasks
+
+Completed Tasks
+
+Cancelled Tasks
+
+Failed Tasks
+
+Grouped by bot.
+
+==========================================================
+PLUGINS PAGE
+==========================================================
+
+List installed plugins.
+
+Name
+
+Version
+
+Description
+
+Enabled
+
+==========================================================
+LOGS PAGE
+==========================================================
+
+Live console viewer.
+
+Auto-scroll.
+
+Search box.
+
+Filter by bot.
+
+Filter by level.
+
+==========================================================
+SETTINGS PAGE
+==========================================================
+
+Show
+
+Server
+
+API
+
+Version
+
+Owner
+
+Theme
+
+No editing yet.
+
+==========================================================
+NEW REST ENDPOINTS
+==========================================================
+
+Add ONLY the endpoints needed by the dashboard.
+
+GET /api/tasks
+
+GET /api/logs
+
+GET /api/system
+
+Do not remove or modify existing APIs.
+
+==========================================================
+IMPORTANT
+==========================================================
+
+This is Phase 1.
+
+READ ONLY.
+
+Do NOT implement bot controls yet.
+
+Do NOT implement create/delete/edit yet.
+
+Just build the professional Control Center UI and connect it to live backend data.
+
+After implementation:
+
+Run the application.
+
+Verify all pages render.
+
+Verify data loads from the REST API.
+
+Do not break any existing functionality.
