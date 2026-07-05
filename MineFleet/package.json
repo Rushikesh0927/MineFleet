@@ -4,7 +4,8 @@
   "description": "Open Source Minecraft Multi Bot Platform",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "healthcheck": "node scripts/healthcheck.js"
   },
   "keywords": [
     "minecraft",
