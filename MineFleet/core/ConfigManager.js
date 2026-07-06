@@ -74,6 +74,29 @@ class ConfigManager {
     console.log('[ConfigManager] Configuration reloaded successfully');
   }
 
+  /**
+   * Persists the in-memory bots array back to config/bots.json.
+   * Called by BotManager whenever a bot is added, removed, or renamed so
+   * that the change survives a platform restart.
+   *
+   * @param {object[]} botsArray — array of plain bot-config objects (NOT BotProfile instances)
+   * @returns {boolean} true on success, false on failure
+   */
+  saveBots(botsArray) {
+    try {
+      const payload = JSON.stringify({ bots: botsArray }, null, 2);
+      fs.writeFileSync(CONFIG_FILES.bots, payload, 'utf8');
+      // Keep in-memory copy in sync
+      this.bots = { bots: botsArray };
+      console.log('[ConfigManager] bots.json saved successfully');
+      return true;
+    } catch (err) {
+      console.error(`[ConfigManager] ERROR: Failed to save bots.json — ${err.message}`);
+      return false;
+    }
+  }
+
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
