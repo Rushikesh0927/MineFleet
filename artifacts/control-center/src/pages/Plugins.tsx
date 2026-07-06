@@ -32,12 +32,8 @@ export default function Plugins() {
     setLoadingAction(`${name}-${action}`);
     try {
       const res = await sendPluginAction(name, action);
-      if (res.ok) {
-        toast.success(res.message || `Plugin ${name} ${action} successful`);
-        refetch(); // Refresh plugin state
-      } else {
-        toast.error(res.error || `Failed to ${action} ${name}`);
-      }
+      toast.success(res?.message || `Plugin ${name} ${action} successful`);
+      refetch(); // Refresh plugin state
     } catch (err: any) {
       toast.error(err.message || `Failed to ${action} ${name}`);
     } finally {

@@ -35,6 +35,7 @@
  */
 
 const express    = require('express');
+const { WebSocketServer } = require('ws');
 const FollowTask = require('../modules/tasks/FollowTask');
 const GotoTask   = require('../modules/tasks/GotoTask');
 const LookAtTask = require('../modules/tasks/LookAtTask');
@@ -136,13 +137,15 @@ class DashboardServer {
    * @param {PluginManager} pluginManager
    * @param {ConfigManager} configManager
    */
-  constructor(botManager, pluginManager, configManager) {
+  constructor(botManager, pluginManager, configManager, eventManager) {
     this.botManager    = botManager;
     this.pluginManager = pluginManager;
     this.configManager = configManager;
+    this.eventManager  = eventManager || global.eventManager; // Support injection or global
 
     this.app    = express();
     this.server = null;
+    this.wss    = null;
 
     this.startedAt = null;
 
@@ -179,6 +182,8 @@ class DashboardServer {
           });
         });
       }
+
+      this._setupWebSockets();
     });
   }
 
@@ -186,11 +191,219 @@ class DashboardServer {
    * Gracefully stops the HTTP server.
    */
   shutdown() {
+    if (this.wss) {
+      this.wss.close();
+      this.wss = null;
+    }
+    if (this._wsIntervals) {
+      this._wsIntervals.forEach(clearInterval);
+      this._wsIntervals = [];
+    }
     if (this.server) {
       this.server.close(() => {
         console.log('[DashboardServer] Server stopped.');
       });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // WebSocket System
+  // ---------------------------------------------------------------------------
+
+  _broadcast(type, payload, targetServerId = null) {
+    if (!this.wss) return;
+    const msg = JSON.stringify({ type, payload });
+    this.wss.clients.forEach(client => {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        // If targetServerId is provided, only send to clients looking at that server (or looking globally if client.serverId is missing)
+        // If client.serverId is provided, only send payloads that match it.
+        // Wait, if targetServerId is null, it means global state. If client has a specific server, we filter it.
+        if (targetServerId && client.serverId && client.serverId !== targetServerId) return;
+        
+        // However, if the payload itself is an array of items for different servers, 
+        // we should just let the frontend filter it, OR we pre-filter it.
+        // The instructions said "scope connections per server". So let's actually just send the message.
+        // Wait, I will filter it before sending if it's a global array, or just send it and let the client filter.
+        // Let's filter the payload if client has a serverId and it's a bulk array!
+        let sendMsg = msg;
+        if (client.serverId) {
+          if (type === 'STATE_UPDATE') {
+            const filteredBots = payload.bots.filter(b => b.serverId === client.serverId);
+            const filteredTasks = payload.tasks.filter(t => this.botManager.profiles[t.botId]?.serverId === client.serverId);
+            sendMsg = JSON.stringify({ type, payload: { bots: filteredBots, tasks: filteredTasks } });
+          } else if (type === 'MAP_UPDATE') {
+            const filteredPositions = payload.filter(p => p.serverId === client.serverId);
+            sendMsg = JSON.stringify({ type, payload: filteredPositions });
+          } else if (type === 'CONSOLE_LOG') {
+            if (payload.botUsername !== 'System' && payload.botUsername !== 'SYSTEM') {
+               const profile = Object.values(this.botManager.profiles).find(p => p.username === payload.botUsername);
+               if (profile && profile.serverId !== client.serverId) return;
+            }
+          }
+        }
+        client.send(sendMsg);
+      }
+    });
+  }
+
+  _setupWebSockets() {
+    this.wss = new WebSocketServer({ server: this.server });
+    this._wsIntervals = [];
+
+    this.wss.on('connection', (ws, req) => {
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      ws.serverId = url.searchParams.get('serverId');
+      ws.send(JSON.stringify({ type: 'hello', payload: { ts: Date.now(), serverId: ws.serverId } }));
+    });
+
+    // Broadcast Bot Status & Tasks every 1000ms
+    const stateInterval = setInterval(() => {
+      if (!this.wss || this.wss.clients.size === 0) return;
+
+      const bots = Object.values(this.botManager.profiles).map((profile) => {
+        const id = profile.id;
+        const state = this.botManager.runtimes[id] || {};
+        const isOnline = state.status === 'ONLINE';
+        let botState = {};
+
+        if (isOnline) {
+          const bot = this.botManager.botEngine.bots[id];
+          if (bot && bot.entity) {
+            botState = {
+              health: bot.health,
+              food: bot.food,
+              position: bot.entity.position,
+              dimension: bot.game?.dimension || 'overworld',
+              gameMode: bot.player?.gamemode === 0 ? 'survival' : 'creative',
+              heldItem: bot.heldItem ? { name: bot.heldItem.name, count: bot.heldItem.count } : null,
+              nearbyPlayers: Object.values(bot.players)
+                .filter(p => p.entity && p.username !== bot.username && p.entity.position.distanceTo(bot.entity.position) < 50)
+                .map(p => p.username),
+            };
+          }
+        }
+        return {
+          id,
+          serverId: profile.serverId,
+          username: profile.username,
+          status: state.status || 'OFFLINE',
+          error: state.error || null,
+          uptime: state.connectedAt ? Math.floor((Date.now() - state.connectedAt) / 1000) : 0,
+          ping: state.ping || 0,
+          autoReconnect: profile.autoReconnect ?? true,
+          ...botState,
+        };
+      });
+
+      const tasks = Object.values(this.botManager.profiles).map(profile => {
+        const id = profile.id;
+        const taskManager = this.botManager.taskManagers[id];
+        return {
+          botId: id,
+          botUsername: profile.username,
+          active: taskManager?.activeTask || null,
+          queue: taskManager?.queue || [],
+        };
+      });
+
+      this._broadcast('STATE_UPDATE', { bots, tasks });
+    }, 1000);
+
+    // Broadcast Map Positions every 500ms for smooth rendering
+    const mapInterval = setInterval(() => {
+      if (!this.wss || this.wss.clients.size === 0) return;
+      
+      const positions = [];
+      Object.entries(this.botManager.botEngine.bots).forEach(([id, bot]) => {
+        if (bot && bot.entity && bot.entity.position) {
+          const profile = this.botManager.profiles[id];
+          if (!profile) return;
+          positions.push({
+            id,
+            username: bot.username,
+            serverId: profile.serverId,
+            health: bot.health,
+            dimension: bot.game?.dimension || 'overworld',
+            position: {
+              x: bot.entity.position.x,
+              y: bot.entity.position.y,
+              z: bot.entity.position.z,
+              yaw: bot.entity.yaw
+            }
+          });
+        }
+      });
+      
+      this._broadcast('MAP_UPDATE', positions);
+    }, 500);
+
+    // Listen to ConsoleBuffer events
+    const onLog = (entry) => {
+      this._broadcast('CONSOLE_LOG', entry);
+    };
+    ConsoleBuffer.on('log', onLog);
+
+    // Event-driven bot state updates (Phase 2.10 requirement)
+    const onBotStateChange = (id) => {
+      if (!this.wss || this.wss.clients.size === 0) return;
+      
+      const profile = this.botManager.profiles[id];
+      if (!profile) return;
+      
+      const state = this.botManager.runtimes[id] || {};
+      const isOnline = state.status === 'ONLINE';
+      let botState = {};
+
+      if (isOnline) {
+        const bot = this.botManager.botEngine.bots[id];
+        if (bot && bot.entity) {
+          botState = {
+            health: bot.health,
+            food: bot.food,
+            position: bot.entity.position,
+            dimension: bot.game?.dimension || 'overworld',
+            gameMode: bot.player?.gamemode === 0 ? 'survival' : 'creative',
+            heldItem: bot.heldItem ? { name: bot.heldItem.name, count: bot.heldItem.count } : null,
+            nearbyPlayers: Object.values(bot.players)
+              .filter(p => p.entity && p.username !== bot.username && p.entity.position.distanceTo(bot.entity.position) < 50)
+              .map(p => p.username),
+          };
+        }
+      }
+      
+      const botStatusObj = {
+        id,
+        serverId: profile.serverId,
+        username: profile.username,
+        status: state.status || 'OFFLINE',
+        error: state.error || null,
+        uptime: state.connectedAt ? Math.floor((Date.now() - state.connectedAt) / 1000) : 0,
+        ping: state.ping || 0,
+        autoReconnect: profile.autoReconnect ?? true,
+        ...botState,
+      };
+
+      const taskManager = this.botManager.taskManagers[id];
+      const taskObj = {
+        botId: id,
+        botUsername: profile.username,
+        active: taskManager?.activeTask || null,
+        queue: taskManager?.queue || [],
+      };
+
+      // Broadcast single bot update (wrapping in arrays to match STATE_UPDATE schema)
+      this._broadcast('STATE_UPDATE', { bots: [botStatusObj], tasks: [taskObj] });
+    };
+
+    if (this.eventManager) {
+      this.eventManager.on('bot:connecting', (botId) => onBotStateChange(botId));
+      this.eventManager.on('bot:login', (botId) => onBotStateChange(botId));
+      this.eventManager.on('bot:spawn', (botId) => onBotStateChange(botId));
+      this.eventManager.on('bot:end', (botId) => onBotStateChange(botId));
+      this.eventManager.on('bot:error', (botId) => onBotStateChange(botId));
+    }
+
+    this._wsIntervals.push(stateInterval, mapInterval);
   }
 
   // ---------------------------------------------------------------------------

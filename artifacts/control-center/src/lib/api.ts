@@ -105,27 +105,30 @@ export interface HealthStatus {
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
 export function useBots(serverId?: string | null) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   return useQuery<BotStatus[]>({
     queryKey: ["bots", serverId],
     queryFn: () => apiFetch(`/api/bots${serverId ? `?serverId=${serverId}` : ''}`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
   });
 }
 
 export function useBot(id: string) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   return useQuery<BotStatus>({
     queryKey: ["bots", id],
     queryFn: () => apiFetch(`/api/bots/${id}`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
     enabled: !!id,
   });
 }
 
 export function useFleetBot(id: string) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   return useQuery<BotStatus>({
     queryKey: ["fleet-bots", id],
     queryFn: () => apiFetch(`/api/fleet/bots/${id}/details`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
     enabled: !!id,
   });
 }
@@ -175,7 +178,7 @@ export function useInventory(id: string) {
   return useQuery<InventoryState>({
     queryKey: ["inventory", id],
     queryFn: () => apiFetch(`/api/bots/${id}/inventory`),
-    refetchInterval: POLL,
+    
     enabled: !!id,
   });
 }
@@ -197,18 +200,12 @@ export async function sendInventoryAction(id: string, action: any) {
   return res.json();
 }
 
-export interface Plugin {
-  name: string;
-  version: string;
-  description: string;
-  enabled: boolean;
-}
 
 export function usePlugins() {
   return useQuery<Plugin[]>({
     queryKey: ["plugins"],
     queryFn: () => apiFetch("/api/plugins"),
-    refetchInterval: POLL,
+    
   });
 }
 
@@ -245,7 +242,7 @@ export function useFleetProfiles() {
   return useQuery<FleetProfile[]>({
     queryKey: ["fleetProfiles"],
     queryFn: () => apiFetch("/api/fleet/profiles"),
-    refetchInterval: POLL,
+    
   });
 }
 
@@ -276,14 +273,16 @@ export async function deployFleetProfile(id: string, serverId?: string | null) {
 }
 
 export function useTasks(serverId?: string | null) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   return useQuery<BotTasks[]>({
     queryKey: ["tasks", serverId],
     queryFn: () => apiFetch(`/api/tasks${serverId ? `?serverId=${serverId}` : ''}`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
   });
 }
 
 export function useLogs(params?: { limit?: number; level?: string; search?: string }) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   const qs = new URLSearchParams();
   if (params?.limit)  qs.set("limit",  String(params.limit));
   if (params?.level)  qs.set("level",  params.level);
@@ -293,51 +292,17 @@ export function useLogs(params?: { limit?: number; level?: string; search?: stri
   return useQuery<LogEntry[]>({
     queryKey: ["logs", params],
     queryFn: () => apiFetch(`/api/logs${query}`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
   });
 }
 
 export function useConsoleLogs(serverId?: string | null) {
-  const [logs, setLogs] = React.useState<ConsoleLogEntry[]>([]);
-  const [lastId, setLastId] = React.useState(0);
-
-  // Reset logs when serverId changes
-  React.useEffect(() => {
-    setLogs([]);
-    setLastId(0);
-  }, [serverId]);
-
-  React.useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-    let currentLastId = lastId;
-    
-    const fetchLogs = async () => {
-      try {
-        const qs = serverId ? `&serverId=${serverId}` : "";
-        const res = await fetch(`/api/console/logs?since=${currentLastId}${qs}`);
-        if (res.ok) {
-          const newLogs: ConsoleLogEntry[] = await res.json();
-          if (newLogs.length > 0) {
-            setLogs(prev => {
-              const combined = [...prev, ...newLogs];
-              if (combined.length > 1000) return combined.slice(-1000);
-              return combined;
-            });
-            currentLastId = newLogs[newLogs.length - 1].id;
-            setLastId(currentLastId);
-          }
-        }
-      } catch (err) {
-        // silently ignore
-      }
-      timeout = setTimeout(fetchLogs, POLL);
-    };
-    
-    fetchLogs();
-    return () => clearTimeout(timeout);
-  }, [serverId, lastId]); // include dependencies
-
-  return { data: logs };
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
+  return useQuery<ConsoleLogEntry[]>({
+    queryKey: ["logs", serverId],
+    queryFn: () => apiFetch(`/api/console/logs${serverId ? `?serverId=${serverId}` : ''}`),
+    refetchInterval: wsConnected ? false : POLL,
+  });
 }
 
 export interface MapPosition {
@@ -351,10 +316,11 @@ export interface MapPosition {
 }
 
 export function useMapPositions(serverId?: string | null) {
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ["wsConnected"], initialData: false });
   return useQuery<MapPosition[]>({
     queryKey: ["map-positions", serverId],
     queryFn: () => apiFetch(`/api/map/positions${serverId ? `?serverId=${serverId}` : ''}`),
-    refetchInterval: POLL,
+    refetchInterval: wsConnected ? false : POLL,
   });
 }
 
@@ -362,7 +328,6 @@ export function useSystem() {
   return useQuery<SystemInfo>({
     queryKey: ["system"],
     queryFn: () => apiFetch("/api/system"),
-    refetchInterval: POLL,
   });
 }
 
@@ -370,7 +335,6 @@ export function useHealth() {
   return useQuery<HealthStatus>({
     queryKey: ["health"],
     queryFn: () => apiFetch("/health"),
-    refetchInterval: POLL,
   });
 }
 
@@ -378,6 +342,5 @@ export function useConfig() {
   return useQuery<AppConfig>({
     queryKey: ["config"],
     queryFn: () => apiFetch("/api/config"),
-    refetchInterval: 10_000,
   });
 }
