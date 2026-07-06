@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useConsoleLogs, ConsoleLogEntry } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import { Terminal, Search, Filter, Pause, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,8 @@ export default function Logs() {
   const [search, setSearch] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   
-  const { data: logs = [] } = useConsoleLogs();
+  const { activeServerId } = useServerContext();
+  const { data: logs = [] } = useConsoleLogs(activeServerId);
   
   const scrollRef = useRef<HTMLDivElement>(null);
 

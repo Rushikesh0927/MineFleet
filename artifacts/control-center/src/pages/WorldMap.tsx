@@ -1,10 +1,12 @@
 import { useState, useMemo } from "react";
 import { useMapPositions } from "@/lib/api";
 import { Map as MapIcon, Layers, Maximize, ZoomIn, ZoomOut, Compass } from "lucide-react";
+import { useServerContext } from "@/contexts/ServerContext";
 import { cn } from "@/lib/utils";
 
 export default function WorldMap() {
-  const { data: positions = [], isLoading, isError } = useMapPositions();
+  const { activeServerId } = useServerContext();
+  const { data: positions = [], isLoading, isError } = useMapPositions(activeServerId);
   
   const [dimension, setDimension] = useState<string>("minecraft:overworld");
   const [zoom, setZoom] = useState(1);

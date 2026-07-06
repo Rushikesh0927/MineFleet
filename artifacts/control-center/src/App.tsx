@@ -43,6 +43,8 @@ function Router() {
   );
 }
 
+import { ServerProvider } from "@/contexts/ServerContext";
+
 function App() {
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -51,9 +53,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
+        <ServerProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+        </ServerProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

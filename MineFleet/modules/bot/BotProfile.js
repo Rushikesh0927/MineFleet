@@ -17,13 +17,16 @@ class BotProfile {
     // The Minecraft username the bot will log in with
     this.username = data.username;
 
-    // Server hostname or IP address to connect to
+    // ID of the server this bot belongs to
+    this.serverId = data.serverId || 'default';
+
+    // Server hostname or IP address to connect to (legacy/override)
     this.host = data.host;
 
-    // Server port (default Minecraft port is 25565)
+    // Server port (default Minecraft port is 25565) (legacy/override)
     this.port = data.port;
 
-    // Minecraft protocol version string (e.g. "1.20.1")
+    // Minecraft protocol version string (e.g. "1.20.1") (legacy/override)
     this.version = data.version;
 
     // Whether this bot should be started automatically on platform boot

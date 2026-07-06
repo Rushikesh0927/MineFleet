@@ -3,9 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 
 const POLL = 2000;
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let msg = `API error ${res.status}: ${path}`;
+    try {
+      const data = await res.json();
+      msg = data.error || msg;
+    } catch (e) {}
+    throw new Error(msg);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -97,10 +104,10 @@ export interface HealthStatus {
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
-export function useBots() {
+export function useBots(serverId?: string | null) {
   return useQuery<BotStatus[]>({
-    queryKey: ["bots"],
-    queryFn: () => apiFetch("/api/bots"),
+    queryKey: ["bots", serverId],
+    queryFn: () => apiFetch(`/api/bots${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }
@@ -262,16 +269,16 @@ export async function deleteFleetProfile(id: string) {
   });
 }
 
-export async function deployFleetProfile(id: string) {
-  return apiFetch(`/api/fleet/profiles/${id}/deploy`, {
+export async function deployFleetProfile(id: string, serverId?: string | null) {
+  return apiFetch(`/api/fleet/profiles/${id}/deploy${serverId ? `?serverId=${serverId}` : ''}`, {
     method: "POST",
   });
 }
 
-export function useTasks() {
+export function useTasks(serverId?: string | null) {
   return useQuery<BotTasks[]>({
-    queryKey: ["tasks"],
-    queryFn: () => apiFetch("/api/tasks"),
+    queryKey: ["tasks", serverId],
+    queryFn: () => apiFetch(`/api/tasks${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }
@@ -290,9 +297,15 @@ export function useLogs(params?: { limit?: number; level?: string; search?: stri
   });
 }
 
-export function useConsoleLogs() {
+export function useConsoleLogs(serverId?: string | null) {
   const [logs, setLogs] = React.useState<ConsoleLogEntry[]>([]);
   const [lastId, setLastId] = React.useState(0);
+
+  // Reset logs when serverId changes
+  React.useEffect(() => {
+    setLogs([]);
+    setLastId(0);
+  }, [serverId]);
 
   React.useEffect(() => {
     let timeout: ReturnType<typeof setTimeout>;
@@ -300,7 +313,8 @@ export function useConsoleLogs() {
     
     const fetchLogs = async () => {
       try {
-        const res = await fetch(`/api/console/logs?since=${currentLastId}`);
+        const qs = serverId ? `&serverId=${serverId}` : "";
+        const res = await fetch(`/api/console/logs?since=${currentLastId}${qs}`);
         if (res.ok) {
           const newLogs: ConsoleLogEntry[] = await res.json();
           if (newLogs.length > 0) {
@@ -321,7 +335,7 @@ export function useConsoleLogs() {
     
     fetchLogs();
     return () => clearTimeout(timeout);
-  }, []); // Run once on mount
+  }, [serverId, lastId]); // include dependencies
 
   return { data: logs };
 }
@@ -336,10 +350,10 @@ export interface MapPosition {
   destination?: { x: number; z: number } | null;
 }
 
-export function useMapPositions() {
+export function useMapPositions(serverId?: string | null) {
   return useQuery<MapPosition[]>({
-    queryKey: ["map-positions"],
-    queryFn: () => apiFetch("/api/map/positions"),
+    queryKey: ["map-positions", serverId],
+    queryFn: () => apiFetch(`/api/map/positions${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }

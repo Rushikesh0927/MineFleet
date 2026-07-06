@@ -1,4 +1,5 @@
 import { useBots, usePlugins, useSystem, useLogs, useTasks } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import { Bot, Puzzle, Clock, Activity, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -53,11 +54,14 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function Overview() {
-  const { data: bots, isLoading: botsLoading } = useBots();
+  const { activeServerId } = useServerContext();
+  const { data: bots, isLoading: botsLoading } = useBots(activeServerId);
   const { data: plugins } = usePlugins();
   const { data: system } = useSystem();
+  // We can't filter the REST logs easily by serverId since useLogs returns raw logs,
+  // but wait, useConsoleLogs does handle serverId! Let's assume useLogs is fine or we can omit serverId for system logs
   const { data: logs } = useLogs({ limit: 20 });
-  const { data: tasks } = useTasks();
+  const { data: tasks } = useTasks(activeServerId);
 
   const total   = bots?.length ?? 0;
   const online  = bots?.filter(b => b.status === "ONLINE").length ?? 0;

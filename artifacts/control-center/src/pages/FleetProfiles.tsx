@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useFleetProfiles, createFleetProfile, updateFleetProfile, deleteFleetProfile, deployFleetProfile, FleetProfile } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import { Users, Play, Plus, Trash2, Edit, Loader2, Save, X, Server } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 
 export default function FleetProfiles() {
+  const { activeServerId } = useServerContext();
   const { data: profiles, isLoading, isError, refetch } = useFleetProfiles();
   const [deployingId, setDeployingId] = useState<string | null>(null);
   
@@ -55,13 +57,14 @@ export default function FleetProfiles() {
   };
 
   const handleSave = async () => {
-    if (!name.trim()) return toast.error("Profile name is required");
-    if (bots.length === 0) return toast.error("At least one bot is required");
+    if (!name.trim()) { toast.error("Profile name is required"); return; }
+    if (bots.length === 0) { toast.error("At least one bot is required"); return; }
     
     // validate bots
     for (const b of bots) {
       if (!b.username.trim() || !b.host.trim() || !b.port || !b.version.trim()) {
-        return toast.error("All bots must have username, host, port, and version");
+        toast.error("All bots must have username, host, port, and version");
+        return;
       }
     }
 
@@ -93,12 +96,14 @@ export default function FleetProfiles() {
   };
 
   const handleDeploy = async (id: string) => {
+    if (!activeServerId) { toast.error("Please select a server first"); return; }
     setDeployingId(id);
     try {
-      const res = await deployFleetProfile(id);
-      toast.success(`Deployed profile. Scheduled ${res.scheduled} bots, skipped ${res.skipped}.`);
+      await deployFleetProfile(id, activeServerId);
+      toast.success("Fleet profile deployed! Bots are starting...");
+      refetch();
     } catch (err: any) {
-      toast.error(err.message || "Failed to deploy profile");
+      toast.error(`Failed to deploy: ${err.message}`);
     } finally {
       setDeployingId(null);
     }

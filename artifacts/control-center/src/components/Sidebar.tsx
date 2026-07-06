@@ -11,6 +11,14 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useServerContext } from "@/contexts/ServerContext";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const navItems = [
   { href: "/",        label: "Overview",       icon: LayoutDashboard },
@@ -28,6 +36,7 @@ const bottomItems = [
 
 export default function Sidebar() {
   const [location] = useLocation();
+  const { servers, activeServerId, setActiveServerId, isLoading } = useServerContext();
 
   function isActive(href: string) {
     if (href === "/") return location === "/";
@@ -45,6 +54,26 @@ export default function Sidebar() {
           <p className="text-sm font-semibold text-foreground leading-none truncate">MineFleet</p>
           <p className="text-xs text-muted-foreground leading-none mt-0.5">Control Center</p>
         </div>
+      </div>
+
+      {/* Server Selector */}
+      <div className="px-4 py-3 border-b border-sidebar-border bg-sidebar-accent/30">
+        <Select 
+          value={activeServerId || undefined} 
+          onValueChange={setActiveServerId}
+          disabled={isLoading || servers.length === 0}
+        >
+          <SelectTrigger className="w-full h-8 text-xs bg-sidebar border-sidebar-border">
+            <SelectValue placeholder="Select Server" />
+          </SelectTrigger>
+          <SelectContent>
+            {servers.map(server => (
+              <SelectItem key={server.id} value={server.id} className="text-xs">
+                {server.name} ({server.version})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Nav */}

@@ -256,8 +256,17 @@ class DashboardServer {
     });
 
     // GET /api/bots — all bot statuses
-    app.get('/api/bots', (_req, res) => {
-      res.json(this.botManager.getStatuses());
+    app.get('/api/bots', (req, res) => {
+      const serverId = req.query.serverId;
+      let statuses = this.botManager.getStatuses();
+      if (serverId) {
+        // Need to filter by serverId. We'll join with profiles.
+        statuses = statuses.filter(s => {
+          const p = this.botManager.getProfile(s.id);
+          return p && p.serverId === serverId;
+        });
+      }
+      res.json(statuses);
     });
 
     // GET /api/bots/:id — single bot status
@@ -286,9 +295,13 @@ class DashboardServer {
     });
 
     // GET /api/tasks — task queues for every registered bot
-    app.get('/api/tasks', (_req, res) => {
+    app.get('/api/tasks', (req, res) => {
+      const serverId = req.query.serverId;
       const result = [];
-      for (const profile of this.botManager.getProfiles()) {
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+
+      for (const profile of profiles) {
         let active = null;
         let queue  = [];
         try {
@@ -389,15 +402,33 @@ class DashboardServer {
     // GET /api/console/logs — phase 2.3 live console structured event buffer
     app.get('/api/console/logs', (req, res) => {
       const since = parseInt(req.query.since, 10) || 0;
-      const events = ConsoleBuffer.getEventsSince(since);
+      const serverId = req.query.serverId;
+      let events = ConsoleBuffer.getEventsSince(since);
+      
+      // Filter logs to only bots on the selected server (and SYSTEM logs)
+      if (serverId) {
+        events = events.filter(e => {
+          if (e.botUsername === 'System' || e.botUsername === 'SYSTEM') return true;
+          // Find the profile by username (assuming username is unique PER server, we can just check if any bot on this server matches the username)
+          const p = Object.values(this.botManager.profiles).find(
+            prof => (prof.username === e.botUsername || prof.id === e.botUsername) && prof.serverId === serverId
+          );
+          return !!p;
+        });
+      }
       res.json(events);
     });
 
     // ── Phase 2.1: Fleet Management endpoints ───────────────────────────────
 
-    // GET /api/fleet/bots — all bots, full details panel
-    app.get('/api/fleet/bots', (_req, res) => {
-      res.json(this.botManager.getDetailedStatuses());
+    // GET /api/fleet/bots — all bots, optionally filtered by serverId
+    app.get('/api/fleet/bots', (req, res) => {
+      const serverId = req.query.serverId;
+      let statuses = this.botManager.getDetailedStatuses();
+      if (serverId) {
+        statuses = statuses.filter(s => s.profile.serverId === serverId);
+      }
+      res.json(statuses);
     });
 
     // GET /api/fleet/bots/:id/details — single bot full details panel
@@ -483,7 +514,8 @@ class DashboardServer {
     // ── Phase 2.5: World Map endpoints ──────────────────────────────────────
     
     // GET /api/map/positions — all bot and owner positions
-    app.get('/api/map/positions', (_req, res) => {
+    app.get('/api/map/positions', (req, res) => {
+      const serverId = req.query.serverId;
       const positions = [];
       const perms = this.configManager.getPermissions();
       const ownerUsername = perms ? perms.owner : null;
@@ -491,7 +523,10 @@ class DashboardServer {
       let bestOwnerDimension = null;
       let bestOwnerPos = null;
 
-      for (const profile of this.botManager.getProfiles()) {
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+
+      for (const profile of profiles) {
         const liveBot = this.botManager.botEngine?.getBot(profile.id);
         if (!liveBot) continue;
 
@@ -766,23 +801,26 @@ class DashboardServer {
     // ── Bulk actions ────────────────────────────────────────────────────────
 
     // POST /api/fleet/bulk/start — start all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/start', (_req, res) => {
-      fleetLog('BULK_START_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.startAll();
+    app.post('/api/fleet/bulk/start', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_START_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.startAll(serverId);
       res.json({ ok: true, action: 'BULK_START', timestamp: new Date().toISOString() });
     });
 
     // POST /api/fleet/bulk/stop — stop all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/stop', (_req, res) => {
-      fleetLog('BULK_STOP_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.stopAll();
+    app.post('/api/fleet/bulk/stop', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_STOP_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.stopAll(serverId);
       res.json({ ok: true, action: 'BULK_STOP', timestamp: new Date().toISOString() });
     });
 
     // POST /api/fleet/bulk/restart — restart all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/restart', (_req, res) => {
-      fleetLog('BULK_RESTART_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.restartAll();
+    app.post('/api/fleet/bulk/restart', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_RESTART_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.restartAll(serverId);
       res.json({ ok: true, action: 'BULK_RESTART', timestamp: new Date().toISOString() });
     });
 
@@ -794,7 +832,10 @@ class DashboardServer {
         return res.status(400).json(_errResponse('Body must include { "target": "playerUsername" }'));
       }
 
-      const profiles = this.botManager.getProfiles();
+      const serverId = req.query.serverId;
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+      
       let scheduled  = 0;
       let skipped    = 0;
 
@@ -850,7 +891,9 @@ class DashboardServer {
       }
 
       const { x, y, z } = home;
-      const profiles = this.botManager.getProfiles();
+      const serverId = req.query.serverId;
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
 
       profiles.forEach((profile, i) => {
         setTimeout(() => {
@@ -932,6 +975,46 @@ class DashboardServer {
         res.status(500).json(_errResponse(`Failed to reload ${name}: ${err.message}`, 500));
       }
     });
+    // ── Phase 2.9: Servers Endpoints ─────────────────────────────────
+
+    app.get('/api/servers', (_req, res) => {
+      res.json(this.configManager.getServers());
+    });
+
+    app.post('/api/servers', (req, res) => {
+      const { name, host, port, version } = req.body;
+      if (!name || !host || !port || !version) {
+        return res.status(400).json(_errResponse('Missing required fields'));
+      }
+
+      const servers = this.configManager.getServers();
+      const id = `server_${Date.now()}`;
+      servers.push({ id, name, host, port: Number(port), version });
+      
+      if (this.configManager.saveServers(servers)) {
+        fleetLog('SERVER_CREATE', 'SYSTEM', 'SYSTEM', 'ok', { serverId: id, name });
+        res.status(201).json({ ok: true, id });
+      } else {
+        res.status(500).json(_errResponse('Failed to save servers'));
+      }
+    });
+
+    app.delete('/api/servers/:id', (req, res) => {
+      const servers = this.configManager.getServers();
+      const filtered = servers.filter(s => s.id !== req.params.id);
+      
+      if (filtered.length === servers.length) {
+        return res.status(404).json(_errResponse('Server not found', 404));
+      }
+
+      if (this.configManager.saveServers(filtered)) {
+        fleetLog('SERVER_DELETE', 'SYSTEM', 'SYSTEM', 'ok', { serverId: req.params.id });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save servers'));
+      }
+    });
+
     // ── Phase 2.8: Fleet Profiles Endpoints ─────────────────────────────────
 
     app.get('/api/fleet/profiles', (_req, res) => {
@@ -988,6 +1071,7 @@ class DashboardServer {
     });
 
     app.post('/api/fleet/profiles/:id/deploy', (req, res) => {
+      const serverId = req.query.serverId;
       const profile = this.configManager.getFleetProfiles().find(p => p.id === req.params.id);
       if (!profile) return res.status(404).json(_errResponse('Profile not found', 404));
 
@@ -996,7 +1080,10 @@ class DashboardServer {
       const botsToStart = [];
 
       profile.bots.forEach(botConfig => {
-        const existingProfile = Object.values(this.botManager.profiles).find(p => p.username === botConfig.username);
+        const targetServerId = serverId || botConfig.serverId || profile.targetServerId || 'default';
+        const existingProfile = Object.values(this.botManager.profiles).find(
+          p => p.username === botConfig.username && p.serverId === targetServerId
+        );
         if (existingProfile) {
           const status = this.botManager.runtimes[existingProfile.id]?.status;
           if (status === 'ONLINE' || status === 'CONNECTING') {
@@ -1012,6 +1099,7 @@ class DashboardServer {
           const newConfig = {
             id: newId,
             username: botConfig.username,
+            serverId: targetServerId,
             host: botConfig.host,
             port: botConfig.port,
             version: botConfig.version,

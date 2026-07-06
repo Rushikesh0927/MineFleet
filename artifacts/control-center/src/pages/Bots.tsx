@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useBots, useTasks, BotStatus } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import { Bot, Server, Heart, Utensils, Wifi, ChevronRight, Activity, Play, Square, RotateCw, Home, Users, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -129,8 +130,9 @@ function BotCard({ bot, activeTask }: { bot: BotStatus; activeTask: string | nul
 }
 
 export default function Bots() {
-  const { data: bots, isLoading, isError } = useBots();
-  const { data: tasks } = useTasks();
+  const { activeServerId } = useServerContext();
+  const { data: bots, isLoading, isError } = useBots(activeServerId);
+  const { data: tasks } = useTasks(activeServerId);
 
   const [loadingBulk, setLoadingBulk] = useState<string | null>(null);
   const [followTarget, setFollowTarget] = useState("");
@@ -145,7 +147,8 @@ export default function Bots() {
   const handleBulkAction = async (action: string, payload: any = null) => {
     setLoadingBulk(action);
     try {
-      const res = await fetch(`/api/fleet/bulk/${action}`, {
+      const qs = activeServerId ? `?serverId=${activeServerId}` : "";
+      const res = await fetch(`/api/fleet/bulk/${action}${qs}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload ? JSON.stringify(payload) : undefined

@@ -25,6 +25,7 @@ const CONFIG_FILES = {
   bots:        path.join(CONFIG_DIR, 'bots.json'),
   permissions: path.join(CONFIG_DIR, 'permissions.json'),
   fleetProfiles: path.join(CONFIG_DIR, 'profiles.json'),
+  servers:     path.join(CONFIG_DIR, 'servers.json'),
 };
 
 class ConfigManager {
@@ -34,6 +35,7 @@ class ConfigManager {
     this.bots          = null;
     this.permissions   = null;
     this.fleetProfiles = null;
+    this.servers       = null;
   }
 
   /**
@@ -70,8 +72,14 @@ class ConfigManager {
    * Returns the parsed contents of config/profiles.json.
    */
   getFleetProfiles() {
-    // Return array of profiles. If missing, return empty array.
     return this.fleetProfiles?.profiles || [];
+  }
+
+  /**
+   * Returns the parsed contents of config/servers.json.
+   */
+  getServers() {
+    return this.servers?.servers || [];
   }
 
   /**
@@ -126,6 +134,26 @@ class ConfigManager {
     }
   }
 
+  /**
+   * Persists the in-memory servers array back to config/servers.json.
+   *
+   * @param {object[]} serversArray
+   * @returns {boolean} true on success, false on failure
+   */
+  saveServers(serversArray) {
+    try {
+      const payload = JSON.stringify({ servers: serversArray }, null, 2);
+      fs.writeFileSync(CONFIG_FILES.servers, payload, 'utf8');
+      // Keep in-memory copy in sync
+      this.servers = { servers: serversArray };
+      console.log('[ConfigManager] servers.json saved successfully');
+      return true;
+    } catch (err) {
+      console.error(`[ConfigManager] ERROR: Failed to save servers.json — ${err.message}`);
+      return false;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
@@ -139,6 +167,7 @@ class ConfigManager {
     this.bots          = this._readFile('bots',        CONFIG_FILES.bots);
     this.permissions   = this._readFile('permissions', CONFIG_FILES.permissions);
     this.fleetProfiles = this._readFile('profiles',    CONFIG_FILES.fleetProfiles) || { profiles: [] };
+    this.servers       = this._readFile('servers',     CONFIG_FILES.servers) || { servers: [{ id: 'default', name: 'Default Server', host: 'localhost', port: 25565, version: '1.20.4' }] };
   }
 
   /**
