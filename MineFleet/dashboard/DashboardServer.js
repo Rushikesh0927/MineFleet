@@ -21,6 +21,7 @@
 const express = require('express');
 
 const DEFAULT_PORT = 3000;
+const DEBUG = process.env.DEBUG_RECONNECT === 'true';
 
 // ---------------------------------------------------------------------------
 // Module-level log ring buffer — captures console output platform-wide
@@ -85,6 +86,13 @@ class DashboardServer {
     this.server = null;
 
     this.startedAt = null;
+
+    this._diag = {
+      activeSockets: 0,
+      requestCount: 0,
+      byPath: {},
+      lastRequestAt: null,
+    };
   }
 
   /**
@@ -99,6 +107,19 @@ class DashboardServer {
     this.startedAt = Date.now();
     this.server = this.app.listen(port, () => {
       console.log(`[DashboardServer] REST API listening on port ${port}`);
+
+      if (DEBUG) {
+        this.server.on('connection', (socket) => {
+          this._diag.activeSockets += 1;
+          const remote = `${socket.remoteAddress || 'unknown'}:${socket.remotePort || 'unknown'}`;
+          console.log(`[DashboardServer][DEBUG] socket open | remote=${remote} | activeSockets=${this._diag.activeSockets}`);
+
+          socket.on('close', () => {
+            this._diag.activeSockets = Math.max(0, this._diag.activeSockets - 1);
+            console.log(`[DashboardServer][DEBUG] socket close | remote=${remote} | activeSockets=${this._diag.activeSockets}`);
+          });
+        });
+      }
     });
   }
 
@@ -121,6 +142,27 @@ class DashboardServer {
     const app = this.app;
 
     app.use(express.json());
+
+    if (DEBUG) {
+      app.use((req, res, next) => {
+        const start = Date.now();
+        const path = req.originalUrl || req.url || 'unknown';
+        this._diag.requestCount += 1;
+        this._diag.byPath[path] = (this._diag.byPath[path] || 0) + 1;
+        this._diag.lastRequestAt = new Date().toISOString();
+
+        res.on('finish', () => {
+          console.log(
+            `[DashboardServer][DEBUG] ${req.method} ${path} -> ${res.statusCode}` +
+            ` | ${Date.now() - start}ms` +
+            ` | ua=${req.headers['user-agent'] || 'unknown'}` +
+            ` | activeSockets=${this._diag.activeSockets}`,
+          );
+        });
+
+        next();
+      });
+    }
 
     // CORS — allow the Replit proxy / same-origin frontend
     app.use((_req, res, next) => {
