@@ -881,6 +881,57 @@ class DashboardServer {
         note:      'Tasks dispatched asynchronously with stagger. Check /api/logs for per-bot results.',
       });
     });
+
+    // ── Phase 2.7: Plugin Manager Endpoints ─────────────────────────────────
+
+    app.get('/api/plugins', (_req, res) => {
+      const plugins = this.pluginManager.plugins;
+      const result = Object.values(plugins).map(p => ({
+        name: p.name,
+        version: p.version,
+        description: p.description,
+        enabled: p.enabled
+      }));
+      res.json(result);
+    });
+
+    app.post('/api/plugins/:name/enable', (req, res) => {
+      const name = req.params.name;
+      try {
+        const success = this.pluginManager.enablePlugin(name);
+        if (success) {
+          res.json({ ok: true, message: `Plugin ${name} enabled` });
+        } else {
+          res.status(400).json(_errResponse(`Plugin ${name} is already enabled`, 400));
+        }
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to enable ${name}: ${err.message}`, 500));
+      }
+    });
+
+    app.post('/api/plugins/:name/disable', (req, res) => {
+      const name = req.params.name;
+      try {
+        const success = this.pluginManager.disablePlugin(name);
+        if (success) {
+          res.json({ ok: true, message: `Plugin ${name} disabled` });
+        } else {
+          res.status(400).json(_errResponse(`Plugin ${name} is already disabled`, 400));
+        }
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to disable ${name}: ${err.message}`, 500));
+      }
+    });
+
+    app.post('/api/plugins/:name/reload', (req, res) => {
+      const name = req.params.name;
+      try {
+        this.pluginManager.reloadPlugin(name);
+        res.json({ ok: true, message: `Plugin ${name} reloaded (state reset)` });
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to reload ${name}: ${err.message}`, 500));
+      }
+    });
   }
 }
 

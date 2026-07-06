@@ -190,12 +190,35 @@ export async function sendInventoryAction(id: string, action: any) {
   return res.json();
 }
 
+export interface Plugin {
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+}
+
 export function usePlugins() {
   return useQuery<Plugin[]>({
     queryKey: ["plugins"],
     queryFn: () => apiFetch("/api/plugins"),
     refetchInterval: POLL,
   });
+}
+
+export async function sendPluginAction(name: string, action: string) {
+  const res = await fetch(`/api/plugins/${name}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    let err = `Error ${res.status}`;
+    try {
+      const data = await res.json();
+      err = data.error || err;
+    } catch (e) {}
+    throw new Error(err);
+  }
+  return res.json();
 }
 
 export function useTasks() {

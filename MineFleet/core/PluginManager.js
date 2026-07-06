@@ -34,11 +34,41 @@ class PluginManager {
   initialize(eventManager, commandManager, botManager, configManager) {
     const context = new PluginContext(eventManager, commandManager, botManager, configManager);
 
+    this._context = context;
+
     this.plugins = this._loader.loadAll(context);
 
     const count = Object.keys(this.plugins).length;
     console.log(`[PluginManager] Initialized — ${count} plugin${count !== 1 ? 's' : ''} loaded`);
     ConsoleBuffer.pushEvent('System', 'Plugins', `Initialized — ${count} plugin${count !== 1 ? 's' : ''} loaded`, 'info');
+  }
+
+  enablePlugin(name) {
+    const plugin = this.plugins[name];
+    if (!plugin) throw new Error(`Plugin not found: ${name}`);
+    if (plugin.enabled) return false;
+    plugin.enable();
+    ConsoleBuffer.pushEvent('System', 'Plugins', `Enabled plugin: ${name}`, 'info');
+    return true;
+  }
+
+  disablePlugin(name) {
+    const plugin = this.plugins[name];
+    if (!plugin) throw new Error(`Plugin not found: ${name}`);
+    if (!plugin.enabled) return false;
+    plugin.disable();
+    ConsoleBuffer.pushEvent('System', 'Plugins', `Disabled plugin: ${name}`, 'info');
+    return true;
+  }
+
+  reloadPlugin(name) {
+    if (!this.plugins[name]) throw new Error(`Plugin not found: ${name}`);
+    if (!this._context) throw new Error(`Cannot reload: context not initialized`);
+    
+    const newPlugin = this._loader.reload(name, this._context);
+    this.plugins[name] = newPlugin;
+    ConsoleBuffer.pushEvent('System', 'Plugins', `Reloaded plugin: ${name}`, 'info');
+    return true;
   }
 
   /**
