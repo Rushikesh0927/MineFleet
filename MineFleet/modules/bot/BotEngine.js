@@ -21,6 +21,7 @@
 
 const mineflayer      = require('mineflayer');
 const MovementManager = require('../movement/MovementManager');
+const ConsoleBuffer   = require('../../core/ConsoleBuffer');
 
 // ─── Debug flag (item 14) ────────────────────────────────────────────────────
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
@@ -188,6 +189,7 @@ class BotEngine {
     const prevState = this._states[id] || 'NONE';
     this._setState(id, 'CREATING', prevState);
     console.log(`[BotEngine] Creating Bot: ${name}`);
+    ConsoleBuffer.pushEvent(name, 'Reconnect', 'Creating bot instance', 'info');
 
     // ── Item 7: start timing ──────────────────────────────────────────────
     this._timings[id] = { createBotAt: Date.now() };
@@ -367,6 +369,7 @@ class BotEngine {
       this._stats.totalAttempts++;
 
       console.log(`[BotEngine] ${name} reconnecting in ${(delayMs / 1000).toFixed(1)} seconds...`);
+      ConsoleBuffer.pushEvent(name, 'Reconnect', `Reconnecting in ${(delayMs / 1000).toFixed(1)} seconds...`, 'warn');
       this.eventManager.emit('bot:reconnecting', { id, username: name });
 
       this.reconnectTimers[id] = {
@@ -395,6 +398,7 @@ class BotEngine {
           ` | Reconnect started.`,
         );
         console.log(`[BotEngine] ${name} reconnect attempt...`);
+        ConsoleBuffer.pushEvent(name, 'Reconnect', 'Reconnect attempt started...', 'info');
         this.createBot(profile);
       }, delayMs);
     });

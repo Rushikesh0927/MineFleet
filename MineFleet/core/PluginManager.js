@@ -11,6 +11,7 @@
 const path          = require('path');
 const PluginLoader  = require('../plugins/PluginLoader');
 const PluginContext = require('../plugins/PluginContext');
+const ConsoleBuffer = require('./ConsoleBuffer');
 
 class PluginManager {
   constructor() {
@@ -37,6 +38,7 @@ class PluginManager {
 
     const count = Object.keys(this.plugins).length;
     console.log(`[PluginManager] Initialized — ${count} plugin${count !== 1 ? 's' : ''} loaded`);
+    ConsoleBuffer.pushEvent('System', 'Plugins', `Initialized — ${count} plugin${count !== 1 ? 's' : ''} loaded`, 'info');
   }
 
   /**
@@ -46,6 +48,7 @@ class PluginManager {
     this._loader.unloadAll();
     this.plugins = {};
     console.log('[PluginManager] All plugins unloaded');
+    ConsoleBuffer.pushEvent('System', 'Plugins', 'All plugins unloaded', 'info');
   }
 }
 

@@ -1,3 +1,4 @@
+import React from 'react';
 import { useQuery } from "@tanstack/react-query";
 
 const POLL = 2000;
@@ -57,6 +58,15 @@ export interface LogEntry {
   timestamp: string;
   level: "info" | "warn" | "error";
   message: string;
+}
+
+export interface ConsoleLogEntry {
+  id: number;
+  timestamp: string;
+  botUsername: string;
+  category: 'Errors' | 'Commands' | 'Movement' | 'Reconnect' | 'Plugins' | 'All';
+  message: string;
+  severity: 'info' | 'warn' | 'error';
 }
 
 export interface SystemInfo {
@@ -158,6 +168,42 @@ export function useLogs(params?: { limit?: number; level?: string; search?: stri
     queryFn: () => apiFetch(`/api/logs${query}`),
     refetchInterval: POLL,
   });
+}
+
+export function useConsoleLogs() {
+  const [logs, setLogs] = React.useState<ConsoleLogEntry[]>([]);
+  const [lastId, setLastId] = React.useState(0);
+
+  React.useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    let currentLastId = lastId;
+    
+    const fetchLogs = async () => {
+      try {
+        const res = await fetch(`/api/console/logs?since=${currentLastId}`);
+        if (res.ok) {
+          const newLogs: ConsoleLogEntry[] = await res.json();
+          if (newLogs.length > 0) {
+            setLogs(prev => {
+              const combined = [...prev, ...newLogs];
+              if (combined.length > 1000) return combined.slice(-1000);
+              return combined;
+            });
+            currentLastId = newLogs[newLogs.length - 1].id;
+            setLastId(currentLastId);
+          }
+        }
+      } catch (err) {
+        // silently ignore
+      }
+      timeout = setTimeout(fetchLogs, POLL);
+    };
+    
+    fetchLogs();
+    return () => clearTimeout(timeout);
+  }, []); // Run once on mount
+
+  return { data: logs };
 }
 
 export function useSystem() {

@@ -44,6 +44,7 @@ const SneakTask  = require('../modules/tasks/SneakTask');
 const AttackTask = require('../modules/tasks/AttackTask');
 const BotActionTask = require('../modules/tasks/BotActionTask');
 const { fleetLog } = require('../modules/FleetLogger');
+const ConsoleBuffer = require('../core/ConsoleBuffer');
 
 const DEFAULT_PORT = 3000;
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
@@ -379,6 +380,13 @@ class DashboardServer {
         plugins:    totalPlugins,
         logEntries: _logBuffer.length,
       });
+    });
+
+    // GET /api/console/logs — phase 2.3 live console structured event buffer
+    app.get('/api/console/logs', (req, res) => {
+      const since = parseInt(req.query.since, 10) || 0;
+      const events = ConsoleBuffer.getEventsSince(since);
+      res.json(events);
     });
 
     // ── Phase 2.1: Fleet Management endpoints ───────────────────────────────

@@ -18,6 +18,7 @@
  *   bot:connecting   bot:login   bot:spawn   bot:end
  *   bot:kicked       bot:error   bot:death   bot:reconnecting
  */
+const ConsoleBuffer = require('./ConsoleBuffer');
 
 class EventManager {
   constructor() {
@@ -56,47 +57,56 @@ class EventManager {
 
     bind('login', () => {
       console.log(`[EventManager] ${name} logged in.`);
+      ConsoleBuffer.pushEvent(name, 'Reconnect', 'logged in.', 'info');
       this.emit('bot:login', { id, username: name });
     });
 
     bind('spawn', () => {
       console.log(`[EventManager] ${name} spawned.`);
+      ConsoleBuffer.pushEvent(name, 'Reconnect', 'spawned.', 'info');
       this.emit('bot:spawn', { id, username: name });
     });
 
     bind('chat', (username, message) => {
       console.log(`[EventManager] [${name}] <${username}> ${message}`);
+      ConsoleBuffer.pushEvent(name, 'All', `<${username}> ${message}`, 'info');
       this.emit('bot:chat', { id, username: name, sender: username, message });
     });
 
     bind('message', (jsonMsg) => {
       console.log(`[EventManager] [${name}] message: ${jsonMsg.toString()}`);
+      ConsoleBuffer.pushEvent(name, 'All', `message: ${jsonMsg.toString()}`, 'info');
       this.emit('bot:message', { id, username: name, text: jsonMsg.toString() });
     });
 
     bind('end', (reason) => {
       console.log(`[EventManager] ${name} disconnected. Reason: ${reason || 'unknown'}`);
+      ConsoleBuffer.pushEvent(name, 'Reconnect', `disconnected. Reason: ${reason || 'unknown'}`, 'warn');
       this.emit('bot:end', { id, username: name, reason: reason || 'unknown' });
     });
 
     bind('kicked', (reason) => {
       const reasonText = _readableReason(reason);
       console.log(`[EventManager] ${name} was kicked. Reason: ${reasonText}`);
+      ConsoleBuffer.pushEvent(name, 'Errors', `was kicked. Reason: ${reasonText}`, 'error');
       this.emit('bot:kicked', { id, username: name, reason: reasonText, rawReason: reason });
     });
 
     bind('error', (err) => {
       console.log(`[EventManager] ${name} error: ${err.message || err}`);
+      ConsoleBuffer.pushEvent(name, 'Errors', `error: ${err.message || err}`, 'error');
       this.emit('bot:error', { id, username: name, error: err, errorMessage: err.message || String(err) });
     });
 
     bind('death', () => {
       console.log(`[EventManager] ${name} died.`);
+      ConsoleBuffer.pushEvent(name, 'All', 'died.', 'warn');
       this.emit('bot:death', { id, username: name });
     });
 
     bind('health', () => {
       console.log(`[EventManager] ${name} health: ${bot.health} | food: ${bot.food}`);
+      ConsoleBuffer.pushEvent(name, 'All', `health: ${Math.round(bot.health)} | food: ${Math.round(bot.food)}`, 'info');
       this.emit('bot:health', { id, username: name, health: bot.health, food: bot.food });
     });
 

@@ -1,46 +1,69 @@
-import { useState } from "react";
-import { useLogs } from "@/lib/api";
-import { ScrollText, Search, Filter } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { useConsoleLogs, ConsoleLogEntry } from "@/lib/api";
+import { Terminal, Search, Filter, Pause, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Level = "all" | "info" | "warn" | "error";
+type Category = "All" | "Errors" | "Commands" | "Movement" | "Reconnect" | "Plugins";
 
-const LEVEL_COLORS: Record<string, string> = {
-  info:  "text-blue-400",
-  warn:  "text-yellow-400",
-  error: "text-red-400",
+const CATEGORY_COLORS: Record<string, string> = {
+  All: "text-muted-foreground",
+  Errors: "text-red-400",
+  Commands: "text-cyan-400",
+  Movement: "text-green-400",
+  Reconnect: "text-yellow-400",
+  Plugins: "text-purple-400",
 };
 
 export default function Logs() {
-  const [level, setLevel]   = useState<Level>("all");
+  const [category, setCategory] = useState<Category>("All");
   const [search, setSearch] = useState("");
+  const [autoScroll, setAutoScroll] = useState(true);
+  
+  const { data: logs = [] } = useConsoleLogs();
+  
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: logs, isLoading, isError } = useLogs({
-    limit: 300,
-    level: level === "all" ? undefined : level,
-    search: search || undefined,
+  const categories: Category[] = ["All", "Errors", "Commands", "Movement", "Reconnect", "Plugins"];
+
+  const filteredLogs = logs.filter(log => {
+    if (category !== "All" && log.category !== category) return false;
+    if (search && !log.message.toLowerCase().includes(search.toLowerCase()) && 
+                  !log.botUsername.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
   });
 
-  const levels: Level[] = ["all", "info", "warn", "error"];
+  useEffect(() => {
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [filteredLogs, autoScroll]);
+
+  const handleScroll = () => {
+    if (scrollRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
+      if (!isAtBottom && autoScroll) setAutoScroll(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-9rem)] gap-3">
       {/* Controls */}
       <div className="flex items-center gap-3 shrink-0">
-        {/* Level filter */}
+        {/* Category filter */}
         <div className="flex items-center gap-1 bg-card border border-card-border rounded-md p-1">
-          {levels.map(l => (
+          {categories.map(c => (
             <button
-              key={l}
-              onClick={() => setLevel(l)}
+              key={c}
+              onClick={() => setCategory(c)}
               className={cn(
                 "px-3 py-1 text-xs rounded font-medium transition-colors capitalize",
-                level === l
+                category === c
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {l}
+              {c}
             </button>
           ))}
         </div>
@@ -57,39 +80,52 @@ export default function Logs() {
           />
         </div>
 
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+        <button
+          onClick={() => setAutoScroll(!autoScroll)}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors border",
+            autoScroll ? "bg-primary/10 text-primary border-primary/20" : "bg-card text-muted-foreground border-card-border hover:text-foreground"
+          )}
+        >
+          {autoScroll ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+          {autoScroll ? "Auto-scroll On" : "Auto-scroll Off"}
+        </button>
+
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0 w-24 justify-end">
           <Filter className="w-3 h-3" />
-          {logs ? `${logs.length} entries` : "—"}
+          {filteredLogs.length} entries
         </div>
       </div>
 
       {/* Log pane */}
-      <div className="flex-1 bg-card border border-card-border rounded-lg overflow-auto font-mono text-xs">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            Loading logs…
-          </div>
-        ) : isError ? (
-          <div className="flex items-center justify-center h-full text-red-400">
-            Failed to load logs.
-          </div>
-        ) : !logs || logs.length === 0 ? (
+      <div 
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 bg-zinc-950 border border-card-border rounded-lg overflow-auto font-mono text-xs shadow-inner"
+      >
+        {!logs || logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-            <ScrollText className="w-8 h-8 opacity-30" />
-            <p>No log entries</p>
+            <Terminal className="w-8 h-8 opacity-30" />
+            <p>Awaiting live events...</p>
           </div>
         ) : (
           <table className="w-full">
             <tbody>
-              {[...logs].reverse().map(entry => (
-                <tr key={entry.id} className="border-b border-border/50 hover:bg-muted/30">
-                  <td className="px-3 py-1.5 text-[10px] text-muted-foreground whitespace-nowrap w-28">
+              {filteredLogs.map(entry => (
+                <tr key={entry.id} className="border-b border-white/5 hover:bg-white/5 group">
+                  <td className="px-3 py-1 text-[10px] text-zinc-500 whitespace-nowrap w-24">
                     {new Date(entry.timestamp).toLocaleTimeString()}
                   </td>
-                  <td className={cn("px-2 py-1.5 uppercase font-bold text-[10px] whitespace-nowrap w-12", LEVEL_COLORS[entry.level] ?? "text-muted-foreground")}>
-                    {entry.level}
+                  <td className="px-2 py-1 font-semibold text-zinc-400 whitespace-nowrap w-32 truncate" title={entry.botUsername}>
+                    {entry.botUsername}
                   </td>
-                  <td className="px-3 py-1.5 text-foreground break-all whitespace-pre-wrap">
+                  <td className={cn("px-2 py-1 uppercase font-bold text-[10px] whitespace-nowrap w-24", CATEGORY_COLORS[entry.category] ?? "text-muted-foreground")}>
+                    {entry.category}
+                  </td>
+                  <td className={cn("px-3 py-1 break-all whitespace-pre-wrap", 
+                      entry.severity === 'error' ? 'text-red-400' : 
+                      entry.severity === 'warn' ? 'text-yellow-400' : 'text-zinc-300'
+                  )}>
                     {entry.message}
                   </td>
                 </tr>

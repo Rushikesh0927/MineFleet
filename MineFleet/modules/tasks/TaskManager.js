@@ -20,6 +20,7 @@
  */
 
 const Task = require('./Task');
+const ConsoleBuffer = require('../../core/ConsoleBuffer');
 
 class TaskManager {
   /**
@@ -60,6 +61,7 @@ class TaskManager {
     // --- Interruptible (movement) path -------------------------------------
     if (task.interruptible && this.activeTask && this.activeTask.interruptible) {
       console.log(`[TaskManager:${this.botId}] Interrupting movement task: ${this.activeTask.name}`);
+      ConsoleBuffer.pushEvent(this.botId, 'Movement', `Interrupting movement task: ${this.activeTask.name}`, 'info');
       this.activeTask.stop();   // calls mm.stop() via the task's own stop() override
       this.activeTask = null;
       console.log(`[TaskManager:${this.botId}] Starting movement task: ${task.name}`);
@@ -102,6 +104,9 @@ class TaskManager {
   advance() {
     if (this.activeTask && this.activeTask.interruptible) {
       console.log(`[TaskManager:${this.botId}] Movement task completed: ${this.activeTask.name}`);
+      ConsoleBuffer.pushEvent(this.botId, 'Movement', `Movement task completed: ${this.activeTask.name}`, 'info');
+    } else if (this.activeTask) {
+      ConsoleBuffer.pushEvent(this.botId, 'Commands', `Task completed: ${this.activeTask.name}`, 'info');
     }
     this.activeTask = null;
 
@@ -141,6 +146,7 @@ class TaskManager {
   _activate(task) {
     this.activeTask = task;
     console.log(`[TaskManager:${this.botId}] Starting task "${task.name}" (${task.id})`);
+    ConsoleBuffer.pushEvent(this.botId, task.interruptible ? 'Movement' : 'Commands', `Starting task "${task.name}"`, 'info');
     try {
       task.start();
     } catch (err) {
