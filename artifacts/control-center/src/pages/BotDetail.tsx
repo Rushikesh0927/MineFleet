@@ -2,7 +2,7 @@ import { useParams, Link, useLocation } from "wouter";
 import { useFleetBot, useTasks } from "@/lib/api";
 import {
   ArrowLeft, Bot, Heart, Utensils, Wifi, MapPin,
-  Gamepad2, Activity, AlertTriangle, Clock, Play, Square, RotateCw, Trash2, Loader2
+  AlertTriangle, Play, Square, RotateCw, Trash2, Loader2, ArrowRight
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CommandPanel } from "@/components/CommandPanel";
@@ -207,35 +207,43 @@ export default function BotDetail() {
         </div>
       </div>
 
-      {/* Tasks */}
+      {/* Task Queue Visualizer (Phase 2.4) */}
       <div className="bg-card border border-card-border rounded-lg">
-        <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold text-foreground">Tasks</h3>
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Task Queue</h3>
+          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+            {botTasks?.queue?.length ?? 0} queued
+          </span>
         </div>
-        <div className="p-4 space-y-3">
-          {botTasks?.active ? (
-            <div className="flex items-start gap-2">
-              <Activity className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-foreground">{botTasks.active.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  State: {botTasks.active.state} · Priority: {botTasks.active.priority}
-                </p>
-              </div>
-              <span className="ml-auto text-xs bg-primary/15 text-primary px-2 py-0.5 rounded-full">Running</span>
+        <div className="p-4">
+          {!botTasks?.active && (botTasks?.queue ?? []).length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+              <p className="text-sm">Idle / No tasks queued</p>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No active task</p>
-          )}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground shrink-0">Bot</span>
+                <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+              </div>
+              
+              {botTasks?.active && (
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-1.5 bg-primary/10 text-primary border border-primary/20 rounded-md text-sm font-medium shadow-sm flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    {botTasks.active.name}
+                  </div>
+                  {(botTasks.queue.length > 0) && <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+                </div>
+              )}
 
-          {(botTasks?.queue ?? []).length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Queue</p>
-              {botTasks!.queue.map(t => (
-                <div key={t.id} className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t.name}</span>
-                  <span className="ml-auto text-xs">P:{t.priority}</span>
+              {botTasks?.queue?.map((t, i) => (
+                <div key={t.id} className="flex items-center gap-2">
+                  <div className="px-3 py-1.5 bg-muted text-muted-foreground border border-border rounded-md text-sm flex items-center gap-2">
+                    <span className="text-[10px] bg-background px-1.5 py-0.5 rounded text-muted-foreground">P:{t.priority}</span>
+                    {t.name}
+                  </div>
+                  {i < botTasks.queue.length - 1 && <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />}
                 </div>
               ))}
             </div>
