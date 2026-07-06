@@ -1,10 +1,14 @@
-import { useParams, Link } from "wouter";
-import { useBot, useTasks } from "@/lib/api";
+import { useParams, Link, useLocation } from "wouter";
+import { useFleetBot, useTasks } from "@/lib/api";
 import {
   ArrowLeft, Bot, Heart, Utensils, Wifi, MapPin,
-  Gamepad2, Activity, AlertTriangle, Clock,
+  Gamepad2, Activity, AlertTriangle, Clock, Play, Square, RotateCw, Trash2, Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CommandPanel } from "@/components/CommandPanel";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { useState } from "react";
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { cls: string; label: string }> = {
@@ -46,8 +50,28 @@ function StatBar({ value, max, color }: { value: number; max: number; color: str
 export default function BotDetail() {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
-  const { data: bot, isLoading, isError } = useBot(id);
+  const [, setLocation] = useLocation();
+  const { data: bot, isLoading, isError } = useFleetBot(id);
   const { data: tasks } = useTasks();
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  const handleFleetAction = async (action: string) => {
+    setLoadingAction(action);
+    try {
+      const res = await fetch(`/api/fleet/bots/${id}${action ? '/' + action : ''}`, { 
+        method: action === 'remove' ? 'DELETE' : 'POST' 
+      });
+      if (!res.ok) throw new Error(`Failed to ${action}`);
+      toast.success(`Bot ${action} successful`);
+      if (action === 'remove') {
+        setLocation('/bots');
+      }
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setLoadingAction(null);
+    }
+  };
 
   const botTasks = tasks?.find(t => t.botId === id);
 
@@ -87,18 +111,44 @@ export default function BotDetail() {
       </div>
 
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className={cn(
-          "w-10 h-10 rounded-full flex items-center justify-center",
-          bot.status === "ONLINE" ? "bg-green-500/15" : "bg-muted"
-        )}>
-          <Bot className={cn("w-5 h-5", bot.status === "ONLINE" ? "text-green-400" : "text-muted-foreground")} />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "w-10 h-10 rounded-full flex items-center justify-center",
+            bot.status === "ONLINE" ? "bg-green-500/15" : "bg-muted"
+          )}>
+            <Bot className={cn("w-5 h-5", bot.status === "ONLINE" ? "text-green-400" : "text-muted-foreground")} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-foreground">{bot.username}</h2>
+            <p className="text-xs text-muted-foreground font-mono">ID: {bot.id}</p>
+          </div>
+          <StatusBadge status={bot.status} />
         </div>
-        <div>
-          <h2 className="text-lg font-bold text-foreground">{bot.username}</h2>
-          <p className="text-xs text-muted-foreground font-mono">ID: {bot.id}</p>
+
+        {/* Fleet Controls */}
+        <div className="flex items-center gap-2">
+          {bot.status !== 'ONLINE' && (
+            <Button size="sm" variant="outline" onClick={() => handleFleetAction('start')} disabled={loadingAction === 'start'}>
+              {loadingAction === 'start' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Play className="w-4 h-4 mr-1.5" />}
+              Start
+            </Button>
+          )}
+          {bot.status === 'ONLINE' && (
+            <Button size="sm" variant="outline" onClick={() => handleFleetAction('stop')} disabled={loadingAction === 'stop'}>
+              {loadingAction === 'stop' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Square className="w-4 h-4 mr-1.5" />}
+              Stop
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => handleFleetAction('restart')} disabled={loadingAction === 'restart'}>
+            {loadingAction === 'restart' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RotateCw className="w-4 h-4 mr-1.5" />}
+            Restart
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => handleFleetAction('remove')} disabled={loadingAction === 'remove'}>
+            {loadingAction === 'remove' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Trash2 className="w-4 h-4 mr-1.5" />}
+            Remove
+          </Button>
         </div>
-        <StatusBadge status={bot.status} />
       </div>
 
       {bot.error && (
@@ -191,6 +241,9 @@ export default function BotDetail() {
           )}
         </div>
       </div>
+
+      {/* Command Panel (Phase 2.2) */}
+      <CommandPanel botId={id} isOnline={bot.status === 'ONLINE'} />
     </div>
   );
 }

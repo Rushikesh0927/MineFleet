@@ -23,6 +23,10 @@ export interface BotStatus {
   gameMode?: string;
   uptime?: number;
   error?: string;
+  autoReconnect?: boolean;
+  heldItem?: any;
+  nearbyPlayers?: string[];
+  inventory?: any[];
 }
 
 export interface Plugin {
@@ -98,6 +102,32 @@ export function useBot(id: string) {
     refetchInterval: POLL,
     enabled: !!id,
   });
+}
+
+export function useFleetBot(id: string) {
+  return useQuery<BotStatus>({
+    queryKey: ["fleet-bots", id],
+    queryFn: () => apiFetch(`/api/fleet/bots/${id}/details`),
+    refetchInterval: POLL,
+    enabled: !!id,
+  });
+}
+
+export async function sendCommand(id: string, cmd: any) {
+  const res = await fetch(`/api/bots/${id}/command`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd),
+  });
+  if (!res.ok) {
+    let err = `Error ${res.status}`;
+    try {
+      const data = await res.json();
+      err = data.error || err;
+    } catch (e) {}
+    throw new Error(err);
+  }
+  return res.json();
 }
 
 export function usePlugins() {
