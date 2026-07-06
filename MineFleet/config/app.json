@@ -3,5 +3,6 @@
   "version": "0.1.0",
   "description": "Open Source Minecraft Multi Bot Platform",
   "logLevel": "info",
-  "timezone": "UTC"
+  "timezone": "UTC",
+  "home": { "x": 0, "y": 64, "z": 0 }
 }

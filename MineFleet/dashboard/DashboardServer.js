@@ -2,9 +2,9 @@
  * dashboard/DashboardServer.js
  *
  * REST API backend for the MineFleet dashboard.
- * Provides read-only endpoints for bot status, plugin info, and configuration.
+ * Provides read-only status endpoints AND Phase 2.1 fleet control endpoints.
  *
- * Routes:
+ * ── Phase 1 (read-only) Routes ────────────────────────────────────────────────
  *   GET /              — API identification
  *   GET /health        — platform health check
  *   GET /api/bots      — all bot statuses
@@ -15,13 +15,35 @@
  *   GET /api/logs      — recent log ring buffer (last 500 entries)
  *   GET /api/system    — process / platform metrics
  *
+ * ── Phase 2.1 (fleet control) Routes ─────────────────────────────────────────
+ *   GET    /api/fleet/bots                  — all bots with full details panel
+ *   GET    /api/fleet/bots/:id/details      — single bot full details panel
+ *   POST   /api/fleet/bots                  — add new bot
+ *   DELETE /api/fleet/bots/:id              — remove bot
+ *   PATCH  /api/fleet/bots/:id/rename       — rename bot
+ *   POST   /api/fleet/bots/:id/start        — start bot
+ *   POST   /api/fleet/bots/:id/stop         — stop bot (intentional)
+ *   POST   /api/fleet/bots/:id/restart      — restart bot
+ *   PATCH  /api/fleet/bots/:id/autoreconnect— toggle autoReconnect
+ *   POST   /api/fleet/bulk/start            — start all (staggered)
+ *   POST   /api/fleet/bulk/stop             — stop all (staggered)
+ *   POST   /api/fleet/bulk/restart          — restart all (staggered)
+ *   POST   /api/fleet/bulk/follow           — follow owner (body: { target })
+ *   POST   /api/fleet/bulk/gohome           — go home (reads home from app.json)
+ *
  * Default port: 3000 (overridden by DASHBOARD_PORT env var)
  */
 
-const express = require('express');
+const express    = require('express');
+const FollowTask = require('../modules/tasks/FollowTask');
+const GotoTask   = require('../modules/tasks/GotoTask');
+const { fleetLog } = require('../modules/FleetLogger');
 
 const DEFAULT_PORT = 3000;
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
+
+// Stagger between bots in bulk follow/gohome (ms)
+const BULK_STAGGER_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Module-level log ring buffer — captures console output platform-wide
@@ -69,6 +91,32 @@ function _formatUptime(seconds) {
   if (h > 0) return `${h}h ${m}m ${s}s`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+/**
+ * Builds a standard success response for fleet action endpoints.
+ */
+function _okResponse(action, botId, username, extra = {}) {
+  return {
+    ok:        true,
+    action,
+    botId,
+    username:  username || botId,
+    timestamp: new Date().toISOString(),
+    ...extra,
+  };
+}
+
+/**
+ * Builds a standard error response for fleet action endpoints.
+ */
+function _errResponse(error, statusCode = 400) {
+  return {
+    ok:        false,
+    error,
+    timestamp: new Date().toISOString(),
+    _status:   statusCode,
+  };
 }
 
 class DashboardServer {
@@ -165,9 +213,10 @@ class DashboardServer {
     }
 
     // CORS — allow the Replit proxy / same-origin frontend
+    // Phase 2.1: extended to include POST, PATCH, DELETE for fleet control
     app.use((_req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
       if (_req.method === 'OPTIONS') {
         return res.sendStatus(204);
@@ -175,7 +224,7 @@ class DashboardServer {
       next();
     });
 
-    // ── Existing endpoints ──────────────────────────────────────────────────
+    // ── Phase 1: Existing read-only endpoints ───────────────────────────────
 
     // GET / — API identification
     app.get('/', (_req, res) => {
@@ -224,8 +273,6 @@ class DashboardServer {
     app.get('/api/config', (_req, res) => {
       res.json(this.configManager.getAppConfig());
     });
-
-    // ── New endpoints ───────────────────────────────────────────────────────
 
     // GET /api/tasks — task queues for every registered bot
     app.get('/api/tasks', (_req, res) => {
@@ -325,6 +372,244 @@ class DashboardServer {
         },
         plugins:    totalPlugins,
         logEntries: _logBuffer.length,
+      });
+    });
+
+    // ── Phase 2.1: Fleet Management endpoints ───────────────────────────────
+
+    // GET /api/fleet/bots — all bots, full details panel
+    app.get('/api/fleet/bots', (_req, res) => {
+      res.json(this.botManager.getDetailedStatuses());
+    });
+
+    // GET /api/fleet/bots/:id/details — single bot full details panel
+    app.get('/api/fleet/bots/:id/details', (req, res) => {
+      const details = this.botManager.getDetailedStatus(req.params.id);
+      if (!details) {
+        return res.status(404).json(_errResponse(`Bot '${req.params.id}' not found`, 404));
+      }
+      res.json(details);
+    });
+
+    // POST /api/fleet/bots — add a new bot
+    // Body: { id, username, host, port, version, enabled?, autoReconnect? }
+    app.post('/api/fleet/bots', (req, res) => {
+      const config = req.body || {};
+      const result = this.botManager.addBot(config);
+      if (!result.ok) {
+        fleetLog('ADD_BOT', config.id || '?', config.username || '?', 'fail', { error: result.error });
+        return res.status(400).json(_errResponse(result.error));
+      }
+      res.status(201).json(_okResponse('ADD_BOT', config.id, config.username));
+    });
+
+    // DELETE /api/fleet/bots/:id — remove a bot
+    app.delete('/api/fleet/bots/:id', (req, res) => {
+      const id      = req.params.id;
+      const profile = this.botManager.getProfile(id);
+      const username = profile?.username || id;
+
+      const result = this.botManager.removeBot(id);
+      if (!result.ok) {
+        fleetLog('REMOVE_BOT', id, username, 'fail', { error: result.error });
+        return res.status(404).json(_errResponse(result.error, 404));
+      }
+      res.json(_okResponse('REMOVE_BOT', id, username));
+    });
+
+    // PATCH /api/fleet/bots/:id/rename — rename a bot
+    // Body: { username }
+    app.patch('/api/fleet/bots/:id/rename', (req, res) => {
+      const id          = req.params.id;
+      const newUsername = req.body?.username;
+      const profile     = this.botManager.getProfile(id);
+      const oldUsername = profile?.username || id;
+
+      const result = this.botManager.renameBot(id, newUsername);
+      if (!result.ok) {
+        fleetLog('RENAME_BOT', id, oldUsername, 'fail', { error: result.error });
+        return res.status(400).json(_errResponse(result.error));
+      }
+      res.json(_okResponse('RENAME_BOT', id, newUsername, {
+        oldUsername: result.oldUsername,
+        newUsername: result.newUsername,
+      }));
+    });
+
+    // POST /api/fleet/bots/:id/start — start a stopped bot
+    app.post('/api/fleet/bots/:id/start', (req, res) => {
+      const id      = req.params.id;
+      const profile = this.botManager.getProfile(id);
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      fleetLog('START', id, profile.username, 'ok');
+      this.botManager.startBot(id);
+      res.json(_okResponse('START', id, profile.username));
+    });
+
+    // POST /api/fleet/bots/:id/stop — intentionally stop a bot (no reconnect)
+    app.post('/api/fleet/bots/:id/stop', (req, res) => {
+      const id      = req.params.id;
+      const profile = this.botManager.getProfile(id);
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      // fleetLog is called inside stopBot() for intentional stops
+      this.botManager.stopBot(id, true);
+      res.json(_okResponse('STOP', id, profile.username, { intentional: true }));
+    });
+
+    // POST /api/fleet/bots/:id/restart — restart a bot
+    app.post('/api/fleet/bots/:id/restart', (req, res) => {
+      const id      = req.params.id;
+      const profile = this.botManager.getProfile(id);
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      // fleetLog is called inside restartBot()
+      this.botManager.restartBot(id);
+      res.json(_okResponse('RESTART', id, profile.username));
+    });
+
+    // PATCH /api/fleet/bots/:id/autoreconnect — enable/disable autoReconnect
+    // Body: { enabled: true|false }
+    app.patch('/api/fleet/bots/:id/autoreconnect', (req, res) => {
+      const id      = req.params.id;
+      const enabled = req.body?.enabled;
+
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json(_errResponse('Body must include { "enabled": true|false }'));
+      }
+
+      const result = this.botManager.setAutoReconnect(id, enabled);
+      if (!result.ok) {
+        return res.status(404).json(_errResponse(result.error, 404));
+      }
+
+      const profile = this.botManager.getProfile(id);
+      res.json(_okResponse('AUTORECONNECT', id, profile?.username || id, { autoReconnect: enabled }));
+    });
+
+    // ── Bulk actions ────────────────────────────────────────────────────────
+
+    // POST /api/fleet/bulk/start — start all bots (staggered in BotManager)
+    app.post('/api/fleet/bulk/start', (_req, res) => {
+      fleetLog('BULK_START_ALL', 'ALL', 'ALL', 'ok');
+      this.botManager.startAll();
+      res.json({ ok: true, action: 'BULK_START', timestamp: new Date().toISOString() });
+    });
+
+    // POST /api/fleet/bulk/stop — stop all bots (staggered in BotManager)
+    app.post('/api/fleet/bulk/stop', (_req, res) => {
+      fleetLog('BULK_STOP_ALL', 'ALL', 'ALL', 'ok');
+      this.botManager.stopAll();
+      res.json({ ok: true, action: 'BULK_STOP', timestamp: new Date().toISOString() });
+    });
+
+    // POST /api/fleet/bulk/restart — restart all bots (staggered in BotManager)
+    app.post('/api/fleet/bulk/restart', (_req, res) => {
+      fleetLog('BULK_RESTART_ALL', 'ALL', 'ALL', 'ok');
+      this.botManager.restartAll();
+      res.json({ ok: true, action: 'BULK_RESTART', timestamp: new Date().toISOString() });
+    });
+
+    // POST /api/fleet/bulk/follow — follow a named player with all bots (staggered)
+    // Body: { target: "playerUsername" }
+    app.post('/api/fleet/bulk/follow', (req, res) => {
+      const target = req.body?.target;
+      if (!target || typeof target !== 'string') {
+        return res.status(400).json(_errResponse('Body must include { "target": "playerUsername" }'));
+      }
+
+      const profiles = this.botManager.getProfiles();
+      let scheduled  = 0;
+      let skipped    = 0;
+
+      profiles.forEach((profile, i) => {
+        setTimeout(() => {
+          const liveBot = this.botManager.botEngine?.getBot(profile.id);
+          if (!liveBot) {
+            fleetLog('BULK_FOLLOW', profile.id, profile.username, 'fail', { reason: 'bot_offline', target });
+            skipped++;
+            return;
+          }
+
+          const entity = liveBot.players?.[target]?.entity;
+          if (!entity) {
+            fleetLog('BULK_FOLLOW', profile.id, profile.username, 'fail', { reason: 'target_not_visible', target });
+            skipped++;
+            return;
+          }
+
+          const mm = this.botManager.getMovementManager(profile.id);
+          if (!mm) {
+            fleetLog('BULK_FOLLOW', profile.id, profile.username, 'fail', { reason: 'no_movement_manager', target });
+            skipped++;
+            return;
+          }
+
+          const task = new FollowTask(entity, target, mm, 2, 0);
+          this.botManager.assignTask(profile.id, task);
+          fleetLog('BULK_FOLLOW', profile.id, profile.username, 'ok', { target });
+          scheduled++;
+        }, i * BULK_STAGGER_MS);
+      });
+
+      res.json({
+        ok:        true,
+        action:    'BULK_FOLLOW',
+        target,
+        total:     profiles.length,
+        timestamp: new Date().toISOString(),
+        note:      'Tasks dispatched asynchronously with stagger. Check /api/logs for per-bot results.',
+      });
+    });
+
+    // POST /api/fleet/bulk/gohome — send all bots to the home position from app.json
+    app.post('/api/fleet/bulk/gohome', (_req, res) => {
+      const appConfig = this.configManager.getAppConfig();
+      const home      = appConfig?.home;
+
+      if (!home || home.x === undefined || home.y === undefined || home.z === undefined) {
+        return res.status(400).json(_errResponse(
+          'No home coordinates configured. Add { "home": { "x": 0, "y": 64, "z": 0 } } to config/app.json'
+        ));
+      }
+
+      const { x, y, z } = home;
+      const profiles = this.botManager.getProfiles();
+
+      profiles.forEach((profile, i) => {
+        setTimeout(() => {
+          const liveBot = this.botManager.botEngine?.getBot(profile.id);
+          if (!liveBot) {
+            fleetLog('BULK_GOHOME', profile.id, profile.username, 'fail', { reason: 'bot_offline', x, y, z });
+            return;
+          }
+
+          const mm = this.botManager.getMovementManager(profile.id);
+          if (!mm) {
+            fleetLog('BULK_GOHOME', profile.id, profile.username, 'fail', { reason: 'no_movement_manager', x, y, z });
+            return;
+          }
+
+          const task = new GotoTask(x, y, z, mm, 0);
+          this.botManager.assignTask(profile.id, task);
+          fleetLog('BULK_GOHOME', profile.id, profile.username, 'ok', { x, y, z });
+        }, i * BULK_STAGGER_MS);
+      });
+
+      res.json({
+        ok:        true,
+        action:    'BULK_GOHOME',
+        home:      { x, y, z },
+        total:     profiles.length,
+        timestamp: new Date().toISOString(),
+        note:      'Tasks dispatched asynchronously with stagger. Check /api/logs for per-bot results.',
       });
     });
   }
