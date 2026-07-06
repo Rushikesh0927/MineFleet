@@ -15,10 +15,13 @@
  * }
  */
 
+const EventEmitter = require('events');
+
 const MAX_ENTRIES = 1000;
 
-class ConsoleBuffer {
+class ConsoleBuffer extends EventEmitter {
   constructor() {
+    super();
     this.buffer = [];
     this._nextId = 1;
   }
@@ -46,6 +49,8 @@ class ConsoleBuffer {
     if (this.buffer.length > MAX_ENTRIES) {
       this.buffer.shift();
     }
+
+    this.emit('log', entry);
   }
 
   /**

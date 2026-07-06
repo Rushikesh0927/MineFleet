@@ -48,6 +48,7 @@ class Application {
       this.botManager,
       this.pluginManager,
       this.configManager,
+      this.eventManager
     );
     this.keepAlive = new KeepAlive(this.botManager, this.botEngine);
   }

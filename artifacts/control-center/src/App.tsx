@@ -24,7 +24,10 @@ const queryClient = new QueryClient({
   },
 });
 
+import { useWebSocketSync } from "@/hooks/useWebSocketSync";
+
 function Router() {
+  useWebSocketSync();
   return (
     <Layout>
       <Switch>
