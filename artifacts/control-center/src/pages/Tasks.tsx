@@ -1,4 +1,5 @@
 import { useTasks, BotTasks } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import { Activity, Clock, Bot, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +86,8 @@ function BotTaskSection({ bt }: { bt: BotTasks }) {
 }
 
 export default function Tasks() {
-  const { data: tasks, isLoading, isError } = useTasks();
+  const { activeServerId } = useServerContext();
+  const { data: tasks, isLoading, isError } = useTasks(activeServerId);
 
   if (isLoading) {
     return (

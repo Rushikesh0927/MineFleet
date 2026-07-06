@@ -50,6 +50,28 @@ class PluginLoader {
     }
   }
 
+  /**
+   * Re-initializes a plugin by unloading it and loading it again.
+   * Note: This does not clear require.cache, so it only resets state,
+   * it does not hot-reload new code from disk.
+   */
+  reload(name, context) {
+    const plugin = this.plugins[name];
+    if (!plugin) throw new Error(`Plugin not found: ${name}`);
+    const filePath = plugin._filePath;
+    if (!filePath) throw new Error(`Cannot reload ${name}: missing file path`);
+
+    this._unload(name);
+    this._loadFile(filePath, context);
+    
+    // Check if it loaded successfully
+    if (!this.plugins[name]) {
+      throw new Error(`Failed to reload ${name}`);
+    }
+    
+    return this.plugins[name];
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
@@ -98,6 +120,7 @@ class PluginLoader {
       instance.setContext(context);
       instance.load();
       instance.enable();
+      instance._filePath = filePath; // Save for reloading
       this.plugins[instance.name] = instance;
       console.log(`[PluginLoader] Loaded plugin: ${instance.name} v${instance.version}`);
     } catch (err) {

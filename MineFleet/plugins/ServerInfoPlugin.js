@@ -28,6 +28,8 @@ class ServerInfoPlugin extends PluginBase {
     const { commandManager, botManager, configManager } = this.context;
 
     commandManager.register('server', 'Show server name, online bots, and version', (_sender, _args, bot) => {
+      if (!this.enabled) return;
+
       const appConfig  = configManager.getAppConfig();
       const statuses   = botManager.getStatuses();
       const onlineCount = statuses.filter(s => s.status === 'ONLINE').length;

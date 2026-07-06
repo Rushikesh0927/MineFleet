@@ -41,10 +41,10 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
   };
 
   const CoordInputs = ({ value, onChange }: { value: any, onChange: any }) => (
-    <div className="flex items-center gap-2">
-      <Input placeholder="X" value={value.x} onChange={e => onChange({ ...value, x: e.target.value })} className="w-16 h-8 text-xs" />
-      <Input placeholder="Y" value={value.y} onChange={e => onChange({ ...value, y: e.target.value })} className="w-16 h-8 text-xs" />
-      <Input placeholder="Z" value={value.z} onChange={e => onChange({ ...value, z: e.target.value })} className="w-16 h-8 text-xs" />
+    <div className="flex items-center gap-2 flex-1 min-w-0">
+      <Input placeholder="X" value={value.x} onChange={e => onChange({ ...value, x: e.target.value })} className="h-8 text-xs flex-1 min-w-0 px-2" />
+      <Input placeholder="Y" value={value.y} onChange={e => onChange({ ...value, y: e.target.value })} className="h-8 text-xs flex-1 min-w-0 px-2" />
+      <Input placeholder="Z" value={value.z} onChange={e => onChange({ ...value, z: e.target.value })} className="h-8 text-xs flex-1 min-w-0 px-2" />
     </div>
   );
 
@@ -56,9 +56,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Goto */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Goto (x, y, z)</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full">
             <CoordInputs value={goto} onChange={setGoto} />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'goto'} onClick={() => handleCommand('goto', goto)}>
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'goto'} onClick={() => handleCommand('goto', goto)}>
               {loadingCmd === 'goto' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
@@ -67,9 +67,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Look */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Look At (x, y, z)</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full">
             <CoordInputs value={look} onChange={setLook} />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'look'} onClick={() => handleCommand('look', look)}>
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'look'} onClick={() => handleCommand('look', look)}>
               {loadingCmd === 'look' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
@@ -78,9 +78,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Follow */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Follow Target</Label>
-          <div className="flex items-center gap-2">
-            <Input placeholder="Player Name" value={followTarget} onChange={e => setFollowTarget(e.target.value)} className="h-8 text-xs flex-1" />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'follow'} onClick={() => handleCommand('follow', { target: followTarget })}>
+          <div className="flex items-center gap-2 w-full">
+            <Input placeholder="Player Name" value={followTarget} onChange={e => setFollowTarget(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'follow'} onClick={() => handleCommand('follow', { target: followTarget })}>
               {loadingCmd === 'follow' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
@@ -89,9 +89,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Attack */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Attack Target</Label>
-          <div className="flex items-center gap-2">
-            <Input placeholder="Entity / 'hostile'" value={attackTarget} onChange={e => setAttackTarget(e.target.value)} className="h-8 text-xs flex-1" />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'attack'} onClick={() => handleCommand('attack', { target: attackTarget })}>
+          <div className="flex items-center gap-2 w-full">
+            <Input placeholder="Entity / 'hostile'" value={attackTarget} onChange={e => setAttackTarget(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'attack'} onClick={() => handleCommand('attack', { target: attackTarget })}>
               {loadingCmd === 'attack' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
@@ -100,9 +100,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Mine Block */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Mine Block (x, y, z)</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full">
             <CoordInputs value={mine} onChange={setMine} />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'mine'} onClick={() => handleCommand('mine', mine)}>
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'mine'} onClick={() => handleCommand('mine', mine)}>
               {loadingCmd === 'mine' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
@@ -111,9 +111,9 @@ export function CommandPanel({ botId, isOnline }: { botId: string; isOnline: boo
         {/* Place Block */}
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground uppercase">Place Block (x, y, z)</Label>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full">
             <CoordInputs value={place} onChange={setPlace} />
-            <Button size="sm" variant="secondary" className="h-8" disabled={loadingCmd === 'place'} onClick={() => handleCommand('place', place)}>
+            <Button size="sm" variant="secondary" className="h-8 shrink-0" disabled={loadingCmd === 'place'} onClick={() => handleCommand('place', place)}>
               {loadingCmd === 'place' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>

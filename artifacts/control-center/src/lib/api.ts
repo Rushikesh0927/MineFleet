@@ -1,10 +1,18 @@
+import React from 'react';
 import { useQuery } from "@tanstack/react-query";
 
 const POLL = 2000;
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let msg = `API error ${res.status}: ${path}`;
+    try {
+      const data = await res.json();
+      msg = data.error || msg;
+    } catch (e) {}
+    throw new Error(msg);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -59,6 +67,15 @@ export interface LogEntry {
   message: string;
 }
 
+export interface ConsoleLogEntry {
+  id: number;
+  timestamp: string;
+  botUsername: string;
+  category: 'Errors' | 'Commands' | 'Movement' | 'Reconnect' | 'Plugins' | 'All';
+  message: string;
+  severity: 'info' | 'warn' | 'error';
+}
+
 export interface SystemInfo {
   status: string;
   name: string;
@@ -87,10 +104,10 @@ export interface HealthStatus {
 
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
-export function useBots() {
+export function useBots(serverId?: string | null) {
   return useQuery<BotStatus[]>({
-    queryKey: ["bots"],
-    queryFn: () => apiFetch("/api/bots"),
+    queryKey: ["bots", serverId],
+    queryFn: () => apiFetch(`/api/bots${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }
@@ -130,6 +147,63 @@ export async function sendCommand(id: string, cmd: any) {
   return res.json();
 }
 
+export interface InventoryItem {
+  slot: number;
+  empty?: boolean;
+  name?: string;
+  displayName?: string;
+  count?: number;
+  type?: number;
+  maxDurability?: number;
+  durabilityUsed?: number;
+}
+
+export interface InventoryState {
+  slots: InventoryItem[];
+  quickBarSlot: number;
+  equipment: {
+    head: string | null;
+    torso: string | null;
+    legs: string | null;
+    feet: string | null;
+    'off-hand': string | null;
+    hand: string | null;
+  };
+}
+
+export function useInventory(id: string) {
+  return useQuery<InventoryState>({
+    queryKey: ["inventory", id],
+    queryFn: () => apiFetch(`/api/bots/${id}/inventory`),
+    refetchInterval: POLL,
+    enabled: !!id,
+  });
+}
+
+export async function sendInventoryAction(id: string, action: any) {
+  const res = await fetch(`/api/bots/${id}/inventory/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action),
+  });
+  if (!res.ok) {
+    let err = `Error ${res.status}`;
+    try {
+      const data = await res.json();
+      err = data.error || err;
+    } catch (e) {}
+    throw new Error(err);
+  }
+  return res.json();
+}
+
+export interface Plugin {
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+}
+
 export function usePlugins() {
   return useQuery<Plugin[]>({
     queryKey: ["plugins"],
@@ -138,10 +212,73 @@ export function usePlugins() {
   });
 }
 
-export function useTasks() {
+export async function sendPluginAction(name: string, action: string) {
+  const res = await fetch(`/api/plugins/${name}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    let err = `Error ${res.status}`;
+    try {
+      const data = await res.json();
+      err = data.error || err;
+    } catch (e) {}
+    throw new Error(err);
+  }
+  return res.json();
+}
+
+export interface FleetProfile {
+  id: string;
+  name: string;
+  bots: {
+    username: string;
+    host: string;
+    port: number;
+    version: string;
+    autoReconnect?: boolean;
+  }[];
+  defaultAutoReconnect: boolean;
+}
+
+export function useFleetProfiles() {
+  return useQuery<FleetProfile[]>({
+    queryKey: ["fleetProfiles"],
+    queryFn: () => apiFetch("/api/fleet/profiles"),
+    refetchInterval: POLL,
+  });
+}
+
+export async function createFleetProfile(profile: Partial<FleetProfile>) {
+  return apiFetch("/api/fleet/profiles", {
+    method: "POST",
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function updateFleetProfile(id: string, profile: Partial<FleetProfile>) {
+  return apiFetch(`/api/fleet/profiles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function deleteFleetProfile(id: string) {
+  return apiFetch(`/api/fleet/profiles/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function deployFleetProfile(id: string, serverId?: string | null) {
+  return apiFetch(`/api/fleet/profiles/${id}/deploy${serverId ? `?serverId=${serverId}` : ''}`, {
+    method: "POST",
+  });
+}
+
+export function useTasks(serverId?: string | null) {
   return useQuery<BotTasks[]>({
-    queryKey: ["tasks"],
-    queryFn: () => apiFetch("/api/tasks"),
+    queryKey: ["tasks", serverId],
+    queryFn: () => apiFetch(`/api/tasks${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }
@@ -156,6 +293,67 @@ export function useLogs(params?: { limit?: number; level?: string; search?: stri
   return useQuery<LogEntry[]>({
     queryKey: ["logs", params],
     queryFn: () => apiFetch(`/api/logs${query}`),
+    refetchInterval: POLL,
+  });
+}
+
+export function useConsoleLogs(serverId?: string | null) {
+  const [logs, setLogs] = React.useState<ConsoleLogEntry[]>([]);
+  const [lastId, setLastId] = React.useState(0);
+
+  // Reset logs when serverId changes
+  React.useEffect(() => {
+    setLogs([]);
+    setLastId(0);
+  }, [serverId]);
+
+  React.useEffect(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    let currentLastId = lastId;
+    
+    const fetchLogs = async () => {
+      try {
+        const qs = serverId ? `&serverId=${serverId}` : "";
+        const res = await fetch(`/api/console/logs?since=${currentLastId}${qs}`);
+        if (res.ok) {
+          const newLogs: ConsoleLogEntry[] = await res.json();
+          if (newLogs.length > 0) {
+            setLogs(prev => {
+              const combined = [...prev, ...newLogs];
+              if (combined.length > 1000) return combined.slice(-1000);
+              return combined;
+            });
+            currentLastId = newLogs[newLogs.length - 1].id;
+            setLastId(currentLastId);
+          }
+        }
+      } catch (err) {
+        // silently ignore
+      }
+      timeout = setTimeout(fetchLogs, POLL);
+    };
+    
+    fetchLogs();
+    return () => clearTimeout(timeout);
+  }, [serverId, lastId]); // include dependencies
+
+  return { data: logs };
+}
+
+export interface MapPosition {
+  type: 'bot' | 'owner';
+  id?: string;
+  username: string;
+  x: number;
+  z: number;
+  dimension: string;
+  destination?: { x: number; z: number } | null;
+}
+
+export function useMapPositions(serverId?: string | null) {
+  return useQuery<MapPosition[]>({
+    queryKey: ["map-positions", serverId],
+    queryFn: () => apiFetch(`/api/map/positions${serverId ? `?serverId=${serverId}` : ''}`),
     refetchInterval: POLL,
   });
 }

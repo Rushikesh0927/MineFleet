@@ -10,7 +10,10 @@ import Tasks from "@/pages/Tasks";
 import Plugins from "@/pages/Plugins";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
+import WorldMap from "@/pages/WorldMap";
 import NotFound from "@/pages/not-found";
+
+import FleetProfiles from "@/pages/FleetProfiles";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,15 +31,19 @@ function Router() {
         <Route path="/" component={Overview} />
         <Route path="/bots" component={Bots} />
         <Route path="/bots/:id" component={BotDetail} />
+        <Route path="/profiles" component={FleetProfiles} />
         <Route path="/tasks" component={Tasks} />
         <Route path="/plugins" component={Plugins} />
         <Route path="/logs" component={Logs} />
+        <Route path="/map" component={WorldMap} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
   );
 }
+
+import { ServerProvider } from "@/contexts/ServerContext";
 
 function App() {
   useEffect(() => {
@@ -46,9 +53,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
+        <ServerProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Router />
+          </WouterRouter>
+        </ServerProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

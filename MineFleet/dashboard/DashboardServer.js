@@ -43,7 +43,12 @@ const JumpTask   = require('../modules/tasks/JumpTask');
 const SneakTask  = require('../modules/tasks/SneakTask');
 const AttackTask = require('../modules/tasks/AttackTask');
 const BotActionTask = require('../modules/tasks/BotActionTask');
+const MoveItemTask = require('../modules/tasks/MoveItemTask');
+const EquipTask = require('../modules/tasks/EquipTask');
+const DropTask = require('../modules/tasks/DropTask');
+const ConsumeTask = require('../modules/tasks/ConsumeTask');
 const { fleetLog } = require('../modules/FleetLogger');
+const ConsoleBuffer = require('../core/ConsoleBuffer');
 
 const DEFAULT_PORT = 3000;
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
@@ -251,8 +256,17 @@ class DashboardServer {
     });
 
     // GET /api/bots — all bot statuses
-    app.get('/api/bots', (_req, res) => {
-      res.json(this.botManager.getStatuses());
+    app.get('/api/bots', (req, res) => {
+      const serverId = req.query.serverId;
+      let statuses = this.botManager.getStatuses();
+      if (serverId) {
+        // Need to filter by serverId. We'll join with profiles.
+        statuses = statuses.filter(s => {
+          const p = this.botManager.getProfile(s.id);
+          return p && p.serverId === serverId;
+        });
+      }
+      res.json(statuses);
     });
 
     // GET /api/bots/:id — single bot status
@@ -281,9 +295,13 @@ class DashboardServer {
     });
 
     // GET /api/tasks — task queues for every registered bot
-    app.get('/api/tasks', (_req, res) => {
+    app.get('/api/tasks', (req, res) => {
+      const serverId = req.query.serverId;
       const result = [];
-      for (const profile of this.botManager.getProfiles()) {
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+
+      for (const profile of profiles) {
         let active = null;
         let queue  = [];
         try {
@@ -381,11 +399,36 @@ class DashboardServer {
       });
     });
 
+    // GET /api/console/logs — phase 2.3 live console structured event buffer
+    app.get('/api/console/logs', (req, res) => {
+      const since = parseInt(req.query.since, 10) || 0;
+      const serverId = req.query.serverId;
+      let events = ConsoleBuffer.getEventsSince(since);
+      
+      // Filter logs to only bots on the selected server (and SYSTEM logs)
+      if (serverId) {
+        events = events.filter(e => {
+          if (e.botUsername === 'System' || e.botUsername === 'SYSTEM') return true;
+          // Find the profile by username (assuming username is unique PER server, we can just check if any bot on this server matches the username)
+          const p = Object.values(this.botManager.profiles).find(
+            prof => (prof.username === e.botUsername || prof.id === e.botUsername) && prof.serverId === serverId
+          );
+          return !!p;
+        });
+      }
+      res.json(events);
+    });
+
     // ── Phase 2.1: Fleet Management endpoints ───────────────────────────────
 
-    // GET /api/fleet/bots — all bots, full details panel
-    app.get('/api/fleet/bots', (_req, res) => {
-      res.json(this.botManager.getDetailedStatuses());
+    // GET /api/fleet/bots — all bots, optionally filtered by serverId
+    app.get('/api/fleet/bots', (req, res) => {
+      const serverId = req.query.serverId;
+      let statuses = this.botManager.getDetailedStatuses();
+      if (serverId) {
+        statuses = statuses.filter(s => s.profile.serverId === serverId);
+      }
+      res.json(statuses);
     });
 
     // GET /api/fleet/bots/:id/details — single bot full details panel
@@ -466,6 +509,79 @@ class DashboardServer {
       // fleetLog is called inside stopBot() for intentional stops
       this.botManager.stopBot(id, true);
       res.json(_okResponse('STOP', id, profile.username, { intentional: true }));
+    });
+
+    // ── Phase 2.5: World Map endpoints ──────────────────────────────────────
+    
+    // GET /api/map/positions — all bot and owner positions
+    app.get('/api/map/positions', (req, res) => {
+      const serverId = req.query.serverId;
+      const positions = [];
+      const perms = this.configManager.getPermissions();
+      const ownerUsername = perms ? perms.owner : null;
+
+      let bestOwnerDimension = null;
+      let bestOwnerPos = null;
+
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+
+      for (const profile of profiles) {
+        const liveBot = this.botManager.botEngine?.getBot(profile.id);
+        if (!liveBot) continue;
+
+        const dimension = liveBot.game?.dimension || 'minecraft:overworld';
+        const botPos = liveBot.entity?.position;
+        
+        if (ownerUsername && liveBot.players && liveBot.players[ownerUsername]?.entity) {
+            bestOwnerPos = liveBot.players[ownerUsername].entity.position;
+            bestOwnerDimension = dimension;
+        }
+
+        let destination = null;
+        try {
+            const tm = this.botManager.getTaskManager(profile.id);
+            const active = tm.getActive();
+            if (active) {
+                const gotoMatch = active.name.match(/^goto\(([-.\d]+),([-.\d]+),([-.\d]+)\)$/);
+                if (gotoMatch) {
+                    destination = { x: parseFloat(gotoMatch[1]), z: parseFloat(gotoMatch[3]) };
+                }
+                const followMatch = active.name.match(/^follow\(([^)]+)\)$/);
+                if (followMatch) {
+                    const targetName = followMatch[1];
+                    if (liveBot.players[targetName]?.entity) {
+                        const tPos = liveBot.players[targetName].entity.position;
+                        destination = { x: tPos.x, z: tPos.z };
+                    }
+                }
+            }
+        } catch (e) {}
+
+        if (botPos) {
+          positions.push({
+            type: 'bot',
+            id: profile.id,
+            username: profile.username,
+            x: botPos.x,
+            z: botPos.z,
+            dimension,
+            destination
+          });
+        }
+      }
+
+      if (ownerUsername && bestOwnerPos) {
+          positions.push({
+              type: 'owner',
+              username: ownerUsername,
+              x: bestOwnerPos.x,
+              z: bestOwnerPos.z,
+              dimension: bestOwnerDimension
+          });
+      }
+
+      res.json(positions);
     });
 
     // POST /api/fleet/bots/:id/restart — restart a bot
@@ -583,26 +699,128 @@ class DashboardServer {
       }
     });
 
+    // ── Phase 2.6: Inventory Management Endpoints ───────────────────────────
+
+    // GET /api/bots/:id/inventory — expose real-time inventory state
+    app.get('/api/bots/:id/inventory', (req, res) => {
+      const id = req.params.id;
+      const liveBot = this.botManager.botEngine?.getBot(id);
+      
+      if (!liveBot) {
+        return res.status(404).json(_errResponse(`Bot '${id}' is offline or not found`, 404));
+      }
+
+      try {
+        const inv = liveBot.inventory;
+        const slots = inv.slots.map((item, index) => {
+          if (!item) return { slot: index, empty: true };
+          return {
+            slot: index,
+            name: item.name,
+            displayName: item.displayName,
+            count: item.count,
+            type: item.type,
+            maxDurability: item.maxDurability,
+            durabilityUsed: item.durabilityUsed
+          };
+        });
+
+        res.json({
+          slots,
+          quickBarSlot: liveBot.quickBarSlot,
+          equipment: {
+            head: liveBot.equipment[5] ? liveBot.equipment[5].name : null,
+            torso: liveBot.equipment[6] ? liveBot.equipment[6].name : null,
+            legs: liveBot.equipment[7] ? liveBot.equipment[7].name : null,
+            feet: liveBot.equipment[8] ? liveBot.equipment[8].name : null,
+            'off-hand': liveBot.equipment[45] ? liveBot.equipment[45].name : null,
+            hand: liveBot.heldItem ? liveBot.heldItem.name : null
+          }
+        });
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to read inventory: ${err.message}`, 500));
+      }
+    });
+
+    // POST /api/bots/:id/inventory/action — dispatch inventory tasks
+    app.post('/api/bots/:id/inventory/action', (req, res) => {
+      const id = req.params.id;
+      const action = req.body;
+      const profile = this.botManager.getProfile(id);
+
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      const liveBot = this.botManager.botEngine?.getBot(id);
+      const status = this.botManager.getStatus(id)?.status;
+
+      if (!liveBot || status !== 'ONLINE') {
+        return res.status(400).json(_errResponse(`Bot '${id}' is offline or reconnecting`, 400));
+      }
+
+      let task = null;
+      try {
+        switch (action.type) {
+          case 'move':
+            if (action.sourceSlot === undefined || action.destSlot === undefined) {
+              return res.status(400).json(_errResponse('Missing sourceSlot or destSlot'));
+            }
+            task = new MoveItemTask(liveBot, Number(action.sourceSlot), Number(action.destSlot));
+            break;
+          case 'equip':
+            if (!action.destination || action.itemId === undefined) {
+              return res.status(400).json(_errResponse('Missing destination or itemId'));
+            }
+            task = new EquipTask(liveBot, action.destination, Number(action.itemId));
+            break;
+          case 'drop':
+            if (action.slotId === undefined) {
+              return res.status(400).json(_errResponse('Missing slotId'));
+            }
+            task = new DropTask(liveBot, Number(action.slotId), action.count ? Number(action.count) : undefined);
+            break;
+          case 'consume':
+            task = new ConsumeTask(liveBot);
+            break;
+          default:
+            return res.status(400).json(_errResponse(`Unknown inventory action: ${action.type}`));
+        }
+
+        if (task) {
+          this.botManager.assignTask(id, task);
+          fleetLog(`CMD_INVENTORY_${action.type.toUpperCase()}`, id, profile.username, 'ok', { params: action });
+          res.json(_okResponse(`CMD_INVENTORY_${action.type.toUpperCase()}`, id, profile.username, { params: action }));
+        }
+      } catch (err) {
+        fleetLog(`CMD_INVENTORY_${action.type?.toUpperCase() || 'UNKNOWN'}`, id, profile.username, 'fail', { error: err.message });
+        res.status(500).json(_errResponse(`Inventory action failed: ${err.message}`, 500));
+      }
+    });
+
     // ── Bulk actions ────────────────────────────────────────────────────────
 
     // POST /api/fleet/bulk/start — start all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/start', (_req, res) => {
-      fleetLog('BULK_START_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.startAll();
+    app.post('/api/fleet/bulk/start', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_START_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.startAll(serverId);
       res.json({ ok: true, action: 'BULK_START', timestamp: new Date().toISOString() });
     });
 
     // POST /api/fleet/bulk/stop — stop all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/stop', (_req, res) => {
-      fleetLog('BULK_STOP_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.stopAll();
+    app.post('/api/fleet/bulk/stop', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_STOP_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.stopAll(serverId);
       res.json({ ok: true, action: 'BULK_STOP', timestamp: new Date().toISOString() });
     });
 
     // POST /api/fleet/bulk/restart — restart all bots (staggered in BotManager)
-    app.post('/api/fleet/bulk/restart', (_req, res) => {
-      fleetLog('BULK_RESTART_ALL', 'ALL', 'ALL', 'ok');
-      this.botManager.restartAll();
+    app.post('/api/fleet/bulk/restart', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_RESTART_ALL', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.restartAll(serverId);
       res.json({ ok: true, action: 'BULK_RESTART', timestamp: new Date().toISOString() });
     });
 
@@ -614,7 +832,10 @@ class DashboardServer {
         return res.status(400).json(_errResponse('Body must include { "target": "playerUsername" }'));
       }
 
-      const profiles = this.botManager.getProfiles();
+      const serverId = req.query.serverId;
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
+      
       let scheduled  = 0;
       let skipped    = 0;
 
@@ -670,7 +891,9 @@ class DashboardServer {
       }
 
       const { x, y, z } = home;
-      const profiles = this.botManager.getProfiles();
+      const serverId = req.query.serverId;
+      let profiles = this.botManager.getProfiles();
+      if (serverId) profiles = profiles.filter(p => p.serverId === serverId);
 
       profiles.forEach((profile, i) => {
         setTimeout(() => {
@@ -700,6 +923,210 @@ class DashboardServer {
         timestamp: new Date().toISOString(),
         note:      'Tasks dispatched asynchronously with stagger. Check /api/logs for per-bot results.',
       });
+    });
+
+    // ── Phase 2.7: Plugin Manager Endpoints ─────────────────────────────────
+
+    app.get('/api/plugins', (_req, res) => {
+      const plugins = this.pluginManager.plugins;
+      const result = Object.values(plugins).map(p => ({
+        name: p.name,
+        version: p.version,
+        description: p.description,
+        enabled: p.enabled
+      }));
+      res.json(result);
+    });
+
+    app.post('/api/plugins/:name/enable', (req, res) => {
+      const name = req.params.name;
+      try {
+        const success = this.pluginManager.enablePlugin(name);
+        if (success) {
+          res.json({ ok: true, message: `Plugin ${name} enabled` });
+        } else {
+          res.status(400).json(_errResponse(`Plugin ${name} is already enabled`, 400));
+        }
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to enable ${name}: ${err.message}`, 500));
+      }
+    });
+
+    app.post('/api/plugins/:name/disable', (req, res) => {
+      const name = req.params.name;
+      try {
+        const success = this.pluginManager.disablePlugin(name);
+        if (success) {
+          res.json({ ok: true, message: `Plugin ${name} disabled` });
+        } else {
+          res.status(400).json(_errResponse(`Plugin ${name} is already disabled`, 400));
+        }
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to disable ${name}: ${err.message}`, 500));
+      }
+    });
+
+    app.post('/api/plugins/:name/reload', (req, res) => {
+      const name = req.params.name;
+      try {
+        this.pluginManager.reloadPlugin(name);
+        res.json({ ok: true, message: `Plugin ${name} reloaded (state reset)` });
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to reload ${name}: ${err.message}`, 500));
+      }
+    });
+    // ── Phase 2.9: Servers Endpoints ─────────────────────────────────
+
+    app.get('/api/servers', (_req, res) => {
+      res.json(this.configManager.getServers());
+    });
+
+    app.post('/api/servers', (req, res) => {
+      const { name, host, port, version } = req.body;
+      if (!name || !host || !port || !version) {
+        return res.status(400).json(_errResponse('Missing required fields'));
+      }
+
+      const servers = this.configManager.getServers();
+      const id = `server_${Date.now()}`;
+      servers.push({ id, name, host, port: Number(port), version });
+      
+      if (this.configManager.saveServers(servers)) {
+        fleetLog('SERVER_CREATE', 'SYSTEM', 'SYSTEM', 'ok', { serverId: id, name });
+        res.status(201).json({ ok: true, id });
+      } else {
+        res.status(500).json(_errResponse('Failed to save servers'));
+      }
+    });
+
+    app.delete('/api/servers/:id', (req, res) => {
+      const servers = this.configManager.getServers();
+      const filtered = servers.filter(s => s.id !== req.params.id);
+      
+      if (filtered.length === servers.length) {
+        return res.status(404).json(_errResponse('Server not found', 404));
+      }
+
+      if (this.configManager.saveServers(filtered)) {
+        fleetLog('SERVER_DELETE', 'SYSTEM', 'SYSTEM', 'ok', { serverId: req.params.id });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save servers'));
+      }
+    });
+
+    // ── Phase 2.8: Fleet Profiles Endpoints ─────────────────────────────────
+
+    app.get('/api/fleet/profiles', (_req, res) => {
+      res.json(this.configManager.getFleetProfiles());
+    });
+
+    app.post('/api/fleet/profiles', (req, res) => {
+      const { name, bots, defaultAutoReconnect } = req.body;
+      if (!name || !bots) return res.status(400).json(_errResponse('Missing name or bots array'));
+
+      const profiles = this.configManager.getFleetProfiles();
+      const id = `profile_${Date.now()}`;
+      profiles.push({ id, name, bots, defaultAutoReconnect: !!defaultAutoReconnect });
+      
+      if (this.configManager.saveFleetProfiles(profiles)) {
+        fleetLog('PROFILE_CREATE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: id, name });
+        res.status(201).json({ ok: true, id });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.put('/api/fleet/profiles/:id', (req, res) => {
+      const { name, bots, defaultAutoReconnect } = req.body;
+      const profiles = this.configManager.getFleetProfiles();
+      const idx = profiles.findIndex(p => p.id === req.params.id);
+      
+      if (idx === -1) return res.status(404).json(_errResponse('Profile not found', 404));
+
+      profiles[idx] = { ...profiles[idx], name, bots, defaultAutoReconnect: !!defaultAutoReconnect };
+      
+      if (this.configManager.saveFleetProfiles(profiles)) {
+        fleetLog('PROFILE_UPDATE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id, name });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.delete('/api/fleet/profiles/:id', (req, res) => {
+      const profiles = this.configManager.getFleetProfiles();
+      const filtered = profiles.filter(p => p.id !== req.params.id);
+      
+      if (filtered.length === profiles.length) {
+        return res.status(404).json(_errResponse('Profile not found', 404));
+      }
+
+      if (this.configManager.saveFleetProfiles(filtered)) {
+        fleetLog('PROFILE_DELETE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.post('/api/fleet/profiles/:id/deploy', (req, res) => {
+      const serverId = req.query.serverId;
+      const profile = this.configManager.getFleetProfiles().find(p => p.id === req.params.id);
+      if (!profile) return res.status(404).json(_errResponse('Profile not found', 404));
+
+      let scheduled = 0;
+      let skipped = 0;
+      const botsToStart = [];
+
+      profile.bots.forEach(botConfig => {
+        const targetServerId = serverId || botConfig.serverId || profile.targetServerId || 'default';
+        const existingProfile = Object.values(this.botManager.profiles).find(
+          p => p.username === botConfig.username && p.serverId === targetServerId
+        );
+        if (existingProfile) {
+          const status = this.botManager.runtimes[existingProfile.id]?.status;
+          if (status === 'ONLINE' || status === 'CONNECTING') {
+            fleetLog('DEPLOY_SKIP', existingProfile.id, existingProfile.username, 'skip', { reason: 'already_running', profileName: profile.name });
+            skipped++;
+          } else {
+            // Apply default autoReconnect
+            this.botManager.setAutoReconnect(existingProfile.id, botConfig.autoReconnect ?? profile.defaultAutoReconnect ?? true);
+            botsToStart.push({ id: existingProfile.id, username: existingProfile.username, action: 'start' });
+          }
+        } else {
+          const newId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const newConfig = {
+            id: newId,
+            username: botConfig.username,
+            serverId: targetServerId,
+            host: botConfig.host,
+            port: botConfig.port,
+            version: botConfig.version,
+            enabled: true,
+            autoReconnect: botConfig.autoReconnect ?? profile.defaultAutoReconnect ?? true
+          };
+          botsToStart.push({ id: newId, username: newConfig.username, action: 'add', config: newConfig });
+        }
+      });
+
+      // Stagger deployments
+      botsToStart.forEach((botDeploy, i) => {
+        if (botDeploy.action === 'add') {
+          // addBot handles stagger automatically via _scheduleInitialStart since enabled = true
+          this.botManager.addBot(botDeploy.config);
+          fleetLog('DEPLOY_ADD', botDeploy.id, botDeploy.username, 'ok', { profileName: profile.name });
+        } else {
+          setTimeout(() => {
+            this.botManager.startBot(botDeploy.id);
+            fleetLog('DEPLOY_START', botDeploy.id, botDeploy.username, 'ok', { profileName: profile.name });
+          }, i * BULK_STAGGER_MS);
+        }
+        scheduled++;
+      });
+
+      fleetLog('PROFILE_DEPLOY', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id, name: profile.name, scheduled, skipped });
+      res.json({ ok: true, scheduled, skipped });
     });
   }
 }

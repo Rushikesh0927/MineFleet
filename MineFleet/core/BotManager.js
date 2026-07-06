@@ -274,11 +274,13 @@ class BotManager {
   }
 
   /**
-   * Starts all loaded bot profiles (staggered by BULK_STAGGER_MS).
+   * Starts all loaded bot profiles (staggered by BULK_STAGGER_MS), optionally filtered by serverId.
    */
-  startAll() {
-    console.log('[BotManager] Starting all bots (staggered)...');
-    const ids = Object.keys(this.profiles);
+  startAll(serverId = null) {
+    console.log(`[BotManager] Starting all bots (staggered)${serverId ? ` for server ${serverId}` : ''}...`);
+    let ids = Object.keys(this.profiles);
+    if (serverId) ids = ids.filter(id => this.profiles[id].serverId === serverId);
+
     ids.forEach((id, i) => {
       setTimeout(() => {
         fleetLog('BULK_START', id, this.profiles[id]?.username || id, 'ok', { index: i });
@@ -288,11 +290,13 @@ class BotManager {
   }
 
   /**
-   * Stops all active bots (staggered by BULK_STAGGER_MS).
+   * Stops all active bots (staggered by BULK_STAGGER_MS), optionally filtered by serverId.
    */
-  stopAll() {
-    console.log('[BotManager] Stopping all bots (staggered)...');
-    const ids = Object.keys(this.profiles);
+  stopAll(serverId = null) {
+    console.log(`[BotManager] Stopping all bots (staggered)${serverId ? ` for server ${serverId}` : ''}...`);
+    let ids = Object.keys(this.profiles);
+    if (serverId) ids = ids.filter(id => this.profiles[id].serverId === serverId);
+
     ids.forEach((id, i) => {
       setTimeout(() => {
         fleetLog('BULK_STOP', id, this.profiles[id]?.username || id, 'ok', { index: i, intentional: true });
@@ -302,11 +306,13 @@ class BotManager {
   }
 
   /**
-   * Restarts all loaded bots (staggered by BULK_STAGGER_MS).
+   * Restarts all loaded bots (staggered by BULK_STAGGER_MS), optionally filtered by serverId.
    */
-  restartAll() {
-    console.log('[BotManager] Restarting all bots (staggered)...');
-    const ids = Object.keys(this.profiles);
+  restartAll(serverId = null) {
+    console.log(`[BotManager] Restarting all bots (staggered)${serverId ? ` for server ${serverId}` : ''}...`);
+    let ids = Object.keys(this.profiles);
+    if (serverId) ids = ids.filter(id => this.profiles[id].serverId === serverId);
+
     ids.forEach((id, i) => {
       setTimeout(() => {
         fleetLog('BULK_RESTART', id, this.profiles[id]?.username || id, 'ok', { index: i });
@@ -339,15 +345,20 @@ class BotManager {
       return { ok: false, error: `Bot id '${config.id}' already exists` };
     }
 
-    // Check for duplicate username
-    const duplicate = Object.values(this.profiles).find(p => p.username === config.username);
+    const serverId = config.serverId || 'default';
+
+    // Check for duplicate username ON THE SAME SERVER
+    const duplicate = Object.values(this.profiles).find(
+      p => p.username === config.username && p.serverId === serverId
+    );
     if (duplicate) {
-      return { ok: false, error: `Username '${config.username}' is already in use by bot '${duplicate.id}'` };
+      return { ok: false, error: `Username '${config.username}' is already in use by bot '${duplicate.id}' on server '${serverId}'` };
     }
 
     const entry = {
       id:            config.id,
       username:      config.username,
+      serverId:      serverId,
       host:          config.host,
       port:          Number(config.port),
       version:       config.version,
@@ -435,12 +446,12 @@ class BotManager {
 
     newUsername = newUsername.trim();
 
-    // Uniqueness check (exclude self)
+    // Uniqueness check (exclude self, but check same server)
     const conflict = Object.values(this.profiles).find(
-      p => p.username === newUsername && p.id !== id
+      p => p.username === newUsername && p.serverId === profile.serverId && p.id !== id
     );
     if (conflict) {
-      return { ok: false, error: `Username '${newUsername}' is already in use by bot '${conflict.id}'` };
+      return { ok: false, error: `Username '${newUsername}' is already in use by bot '${conflict.id}' on this server` };
     }
 
     const oldUsername = profile.username;
@@ -866,6 +877,7 @@ class BotManager {
     const botsArray = Object.values(this.profiles).map(p => ({
       id:            p.id,
       username:      p.username,
+      serverId:      p.serverId,
       host:          p.host,
       port:          p.port,
       version:       p.version,

@@ -11,6 +11,8 @@
  *   [Fleet] <ISO-timestamp> | <username> | action=<ACTION> | result=<ok|fail> [| <extra>]
  */
 
+const ConsoleBuffer = require('../core/ConsoleBuffer');
+
 /**
  * Logs a fleet management action with a timestamp.
  *
@@ -26,10 +28,30 @@ function fleetLog(action, botId, username, result, extra = {}) {
   let line = `[Fleet] ${ts} | ${username || botId} | action=${action} | result=${result}`;
 
   for (const [k, v] of Object.entries(extra)) {
-    line += ` | ${k}=${v}`;
+    if (typeof v === 'object') {
+      line += ` | ${k}=${JSON.stringify(v)}`;
+    } else {
+      line += ` | ${k}=${v}`;
+    }
   }
 
   console.log(line);
+
+  // Map action to category
+  const isCommand = action.startsWith('CMD_');
+  const category = isCommand ? 'Commands' : 'Reconnect';
+  const severity = result === 'fail' ? 'error' : 'info';
+  
+  let msg = `Action: ${action} | Result: ${result}`;
+  for (const [k, v] of Object.entries(extra)) {
+    if (typeof v === 'object') {
+      msg += ` | ${k}=${JSON.stringify(v)}`;
+    } else {
+      msg += ` | ${k}=${v}`;
+    }
+  }
+
+  ConsoleBuffer.pushEvent(username || botId, category, msg, severity);
 }
 
 module.exports = { fleetLog };
