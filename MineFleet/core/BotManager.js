@@ -64,9 +64,16 @@ class BotManager {
 
     // Phase 2.1: per-bot intentional-offline flag
     // When true for a bot ID, the 'end' event should NOT trigger autoReconnect.
-    // Implemented by temporarily setting profile.autoReconnect = false before
-    // calling botEngine.removeBot() — BotEngine reads it in the 'end' handler.
+    // Implemented by setting profile.autoReconnect = false before calling
+    // botEngine.removeBot(). The original value is saved here and restored
+    // when startBot() is explicitly called again — NOT immediately after stop,
+    // because bot.quit() fires the 'end' event asynchronously and a premature
+    // restore would cause BotEngine to schedule a reconnect.
     this._intentionalStop = {};
+
+    // Saves the original autoReconnect value during an intentional stop so
+    // startBot() can restore it correctly when the user restarts the bot.
+    this._savedAutoReconnect = {};
   }
 
   /**
@@ -173,6 +180,12 @@ class BotManager {
     // Clear any intentional-stop flag so the reconnect system works normally
     delete this._intentionalStop[id];
 
+    // Restore autoReconnect that was suppressed during an intentional stop
+    if (this._savedAutoReconnect[id] !== undefined) {
+      profile.autoReconnect = this._savedAutoReconnect[id];
+      delete this._savedAutoReconnect[id];
+    }
+
     console.log(`[BotManager] Starting ${profile.username}`);
     this._setStatus(id, STATUS.CONNECTING);
     this.botEngine.createBot(profile);
@@ -202,13 +215,21 @@ class BotManager {
       delete this.startupTimers[id];
     }
 
-    const savedAutoReconnect = profile.autoReconnect;
-
     if (intentional) {
       // Mark intentional so the event subscriber can skip reconnect status
       this._intentionalStop[id] = true;
-      // Temporarily suppress autoReconnect in the profile object that BotEngine holds
+
+      // Save the original value so startBot() can restore it later.
+      // IMPORTANT: do NOT restore here — bot.quit() fires the 'end' event
+      // asynchronously, so BotEngine's 'end' handler runs AFTER this function
+      // returns. If we restore profile.autoReconnect = true immediately,
+      // BotEngine would see true and schedule a reconnect. The flag must
+      // stay false until the user explicitly calls startBot().
+      if (this._savedAutoReconnect[id] === undefined) {
+        this._savedAutoReconnect[id] = profile.autoReconnect;
+      }
       profile.autoReconnect = false;
+
       console.log(`[BotManager] ${profile.username} intentionally stopping — autoReconnect suppressed`);
       fleetLog('STOP', id, profile.username, 'ok', { intentional: true, autoReconnectSuppressed: true });
     } else {
@@ -217,10 +238,6 @@ class BotManager {
 
     this.botEngine.removeBot(id);
     this._setStatus(id, STATUS.OFFLINE);
-
-    // Restore the original autoReconnect value on the profile object
-    // (only relevant if the reconnect system were to inspect it later)
-    profile.autoReconnect = savedAutoReconnect;
 
     console.log(`[BotManager] ${profile.username} Offline`);
   }
