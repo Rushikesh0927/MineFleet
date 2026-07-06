@@ -1,5 +1,6 @@
 import { useParams, Link, useLocation } from "wouter";
 import { useFleetBot, useTasks } from "@/lib/api";
+import { useServerContext } from "@/contexts/ServerContext";
 import {
   ArrowLeft, Bot, Heart, Utensils, Wifi, MapPin,
   AlertTriangle, Play, Square, RotateCw, Trash2, Loader2, ArrowRight
@@ -52,8 +53,9 @@ export default function BotDetail() {
   const params = useParams<{ id: string }>();
   const id = params.id ?? "";
   const [, setLocation] = useLocation();
+  const { activeServerId } = useServerContext();
   const { data: bot, isLoading, isError } = useFleetBot(id);
-  const { data: tasks } = useTasks();
+  const { data: tasks } = useTasks(activeServerId);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
   const handleFleetAction = async (action: string) => {

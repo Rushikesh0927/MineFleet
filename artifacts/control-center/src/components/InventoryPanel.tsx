@@ -97,7 +97,7 @@ export default function InventoryPanel({ botId }: InventoryPanelProps) {
     <div className="space-y-6">
       
       {/* Contextual Action Bar */}
-      <div className="h-12 flex items-center justify-between bg-sidebar border border-border rounded-lg px-4">
+      <div className="flex items-center justify-between bg-sidebar border border-border rounded-lg px-4 py-2 gap-3 flex-wrap min-h-[3rem]">
          <div className="text-sm font-medium">
             {selectedItem && !selectedItem.empty ? (
                <span className="text-primary flex items-center gap-2">

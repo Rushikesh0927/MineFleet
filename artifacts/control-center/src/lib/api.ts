@@ -200,12 +200,6 @@ export async function sendInventoryAction(id: string, action: any) {
   return res.json();
 }
 
-export interface Plugin {
-  name: string;
-  version: string;
-  description: string;
-  enabled: boolean;
-}
 
 export function usePlugins() {
   return useQuery<Plugin[]>({

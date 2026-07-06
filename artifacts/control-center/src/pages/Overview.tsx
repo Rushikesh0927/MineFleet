@@ -1,3 +1,4 @@
+import React from "react";
 import { useBots, usePlugins, useSystem, useLogs, useTasks } from "@/lib/api";
 import { useServerContext } from "@/contexts/ServerContext";
 import { Bot, Puzzle, Clock, Activity, AlertTriangle, CheckCircle2 } from "lucide-react";

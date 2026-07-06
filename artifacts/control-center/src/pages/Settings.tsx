@@ -1,3 +1,4 @@
+import React from "react";
 import { useSystem, useConfig, useHealth } from "@/lib/api";
 import { Settings as SettingsIcon, Server, Cpu, MemoryStick, Package, Clock } from "lucide-react";
 

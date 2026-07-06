@@ -4,12 +4,14 @@ import { useHealth, useSystem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const PAGE_TITLES: Record<string, string> = {
-  "/":        "Overview",
-  "/bots":    "Bots",
-  "/tasks":   "Tasks",
-  "/plugins": "Plugins",
-  "/logs":    "Logs",
-  "/settings":"Settings",
+  "/":          "Overview",
+  "/bots":      "Bots",
+  "/tasks":     "Tasks",
+  "/plugins":   "Plugins",
+  "/logs":      "Logs",
+  "/settings":  "Settings",
+  "/map":       "World Map",
+  "/profiles":  "Fleet Profiles",
 };
 
 function getTitle(location: string) {
