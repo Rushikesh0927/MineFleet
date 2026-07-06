@@ -8,16 +8,18 @@ import {
   Settings,
   Layers3,
   Map,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/",        label: "Overview",  icon: LayoutDashboard },
-  { href: "/bots",    label: "Bots",      icon: Bot },
-  { href: "/map",     label: "World Map", icon: Map },
-  { href: "/tasks",   label: "Tasks",     icon: ListTodo },
-  { href: "/plugins", label: "Plugins",   icon: Puzzle },
-  { href: "/logs",    label: "Logs",      icon: ScrollText },
+  { href: "/",        label: "Overview",       icon: LayoutDashboard },
+  { href: "/bots",    label: "Bots",           icon: Bot },
+  { href: "/profiles",label: "Fleet Profiles", icon: Users },
+  { href: "/map",     label: "World Map",      icon: Map },
+  { href: "/tasks",   label: "Tasks",          icon: ListTodo },
+  { href: "/plugins", label: "Plugins",        icon: Puzzle },
+  { href: "/logs",    label: "Logs",           icon: ScrollText },
 ];
 
 const bottomItems = [

@@ -221,6 +221,53 @@ export async function sendPluginAction(name: string, action: string) {
   return res.json();
 }
 
+export interface FleetProfile {
+  id: string;
+  name: string;
+  bots: {
+    username: string;
+    host: string;
+    port: number;
+    version: string;
+    autoReconnect?: boolean;
+  }[];
+  defaultAutoReconnect: boolean;
+}
+
+export function useFleetProfiles() {
+  return useQuery<FleetProfile[]>({
+    queryKey: ["fleetProfiles"],
+    queryFn: () => apiFetch("/api/fleet/profiles"),
+    refetchInterval: POLL,
+  });
+}
+
+export async function createFleetProfile(profile: Partial<FleetProfile>) {
+  return apiFetch("/api/fleet/profiles", {
+    method: "POST",
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function updateFleetProfile(id: string, profile: Partial<FleetProfile>) {
+  return apiFetch(`/api/fleet/profiles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function deleteFleetProfile(id: string) {
+  return apiFetch(`/api/fleet/profiles/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function deployFleetProfile(id: string) {
+  return apiFetch(`/api/fleet/profiles/${id}/deploy`, {
+    method: "POST",
+  });
+}
+
 export function useTasks() {
   return useQuery<BotTasks[]>({
     queryKey: ["tasks"],

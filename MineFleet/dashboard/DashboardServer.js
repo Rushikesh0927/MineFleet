@@ -932,6 +932,114 @@ class DashboardServer {
         res.status(500).json(_errResponse(`Failed to reload ${name}: ${err.message}`, 500));
       }
     });
+    // ── Phase 2.8: Fleet Profiles Endpoints ─────────────────────────────────
+
+    app.get('/api/fleet/profiles', (_req, res) => {
+      res.json(this.configManager.getFleetProfiles());
+    });
+
+    app.post('/api/fleet/profiles', (req, res) => {
+      const { name, bots, defaultAutoReconnect } = req.body;
+      if (!name || !bots) return res.status(400).json(_errResponse('Missing name or bots array'));
+
+      const profiles = this.configManager.getFleetProfiles();
+      const id = `profile_${Date.now()}`;
+      profiles.push({ id, name, bots, defaultAutoReconnect: !!defaultAutoReconnect });
+      
+      if (this.configManager.saveFleetProfiles(profiles)) {
+        fleetLog('PROFILE_CREATE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: id, name });
+        res.status(201).json({ ok: true, id });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.put('/api/fleet/profiles/:id', (req, res) => {
+      const { name, bots, defaultAutoReconnect } = req.body;
+      const profiles = this.configManager.getFleetProfiles();
+      const idx = profiles.findIndex(p => p.id === req.params.id);
+      
+      if (idx === -1) return res.status(404).json(_errResponse('Profile not found', 404));
+
+      profiles[idx] = { ...profiles[idx], name, bots, defaultAutoReconnect: !!defaultAutoReconnect };
+      
+      if (this.configManager.saveFleetProfiles(profiles)) {
+        fleetLog('PROFILE_UPDATE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id, name });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.delete('/api/fleet/profiles/:id', (req, res) => {
+      const profiles = this.configManager.getFleetProfiles();
+      const filtered = profiles.filter(p => p.id !== req.params.id);
+      
+      if (filtered.length === profiles.length) {
+        return res.status(404).json(_errResponse('Profile not found', 404));
+      }
+
+      if (this.configManager.saveFleetProfiles(filtered)) {
+        fleetLog('PROFILE_DELETE', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id });
+        res.json({ ok: true });
+      } else {
+        res.status(500).json(_errResponse('Failed to save profiles'));
+      }
+    });
+
+    app.post('/api/fleet/profiles/:id/deploy', (req, res) => {
+      const profile = this.configManager.getFleetProfiles().find(p => p.id === req.params.id);
+      if (!profile) return res.status(404).json(_errResponse('Profile not found', 404));
+
+      let scheduled = 0;
+      let skipped = 0;
+      const botsToStart = [];
+
+      profile.bots.forEach(botConfig => {
+        const existingProfile = Object.values(this.botManager.profiles).find(p => p.username === botConfig.username);
+        if (existingProfile) {
+          const status = this.botManager.runtimes[existingProfile.id]?.status;
+          if (status === 'ONLINE' || status === 'CONNECTING') {
+            fleetLog('DEPLOY_SKIP', existingProfile.id, existingProfile.username, 'skip', { reason: 'already_running', profileName: profile.name });
+            skipped++;
+          } else {
+            // Apply default autoReconnect
+            this.botManager.setAutoReconnect(existingProfile.id, botConfig.autoReconnect ?? profile.defaultAutoReconnect ?? true);
+            botsToStart.push({ id: existingProfile.id, username: existingProfile.username, action: 'start' });
+          }
+        } else {
+          const newId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const newConfig = {
+            id: newId,
+            username: botConfig.username,
+            host: botConfig.host,
+            port: botConfig.port,
+            version: botConfig.version,
+            enabled: true,
+            autoReconnect: botConfig.autoReconnect ?? profile.defaultAutoReconnect ?? true
+          };
+          botsToStart.push({ id: newId, username: newConfig.username, action: 'add', config: newConfig });
+        }
+      });
+
+      // Stagger deployments
+      botsToStart.forEach((botDeploy, i) => {
+        if (botDeploy.action === 'add') {
+          // addBot handles stagger automatically via _scheduleInitialStart since enabled = true
+          this.botManager.addBot(botDeploy.config);
+          fleetLog('DEPLOY_ADD', botDeploy.id, botDeploy.username, 'ok', { profileName: profile.name });
+        } else {
+          setTimeout(() => {
+            this.botManager.startBot(botDeploy.id);
+            fleetLog('DEPLOY_START', botDeploy.id, botDeploy.username, 'ok', { profileName: profile.name });
+          }, i * BULK_STAGGER_MS);
+        }
+        scheduled++;
+      });
+
+      fleetLog('PROFILE_DEPLOY', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id, name: profile.name, scheduled, skipped });
+      res.json({ ok: true, scheduled, skipped });
+    });
   }
 }
 

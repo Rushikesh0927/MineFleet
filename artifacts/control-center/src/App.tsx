@@ -13,6 +13,8 @@ import Settings from "@/pages/Settings";
 import WorldMap from "@/pages/WorldMap";
 import NotFound from "@/pages/not-found";
 
+import FleetProfiles from "@/pages/FleetProfiles";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -29,6 +31,7 @@ function Router() {
         <Route path="/" component={Overview} />
         <Route path="/bots" component={Bots} />
         <Route path="/bots/:id" component={BotDetail} />
+        <Route path="/profiles" component={FleetProfiles} />
         <Route path="/tasks" component={Tasks} />
         <Route path="/plugins" component={Plugins} />
         <Route path="/logs" component={Logs} />
