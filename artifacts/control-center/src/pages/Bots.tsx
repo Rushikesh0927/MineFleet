@@ -61,13 +61,12 @@ function BotCard({ bot, activeTask }: { bot: BotStatus; activeTask: string | nul
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <StatusBadge status={bot.status} />
-            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-        </div>
-
-        {/* Action Bar (Hover or inline) */}
-        <div className="absolute top-3 right-3 hidden group-hover:flex items-center gap-1 bg-card/90 backdrop-blur-sm p-1 rounded-md border border-border shadow-sm" onClick={e => e.preventDefault()}>
+            <div className="group-hover:hidden flex items-center gap-1.5">
+              <StatusBadge status={bot.status} />
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+            </div>
+            {/* Action Bar (Hover or inline) */}
+            <div className="hidden group-hover:flex items-center gap-1" onClick={e => e.preventDefault()}>
           {bot.status !== 'ONLINE' && (
             <Button size="icon" variant="ghost" className="w-7 h-7 text-green-400 hover:text-green-300 hover:bg-green-500/20" onClick={(e) => handleAction(e, 'start')} disabled={loadingAction === 'start'}>
               {loadingAction === 'start' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
@@ -81,6 +80,7 @@ function BotCard({ bot, activeTask }: { bot: BotStatus; activeTask: string | nul
           <Button size="icon" variant="ghost" className="w-7 h-7 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20" onClick={(e) => handleAction(e, 'restart')} disabled={loadingAction === 'restart'}>
             {loadingAction === 'restart' ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" />}
           </Button>
+          </div>
         </div>
 
         {/* Server */}

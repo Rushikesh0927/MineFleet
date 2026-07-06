@@ -58,7 +58,8 @@ export default function BotDetail() {
   const handleFleetAction = async (action: string) => {
     setLoadingAction(action);
     try {
-      const res = await fetch(`/api/fleet/bots/${id}${action ? '/' + action : ''}`, { 
+      const url = action === 'remove' ? `/api/fleet/bots/${id}` : `/api/fleet/bots/${id}/${action}`;
+      const res = await fetch(url, { 
         method: action === 'remove' ? 'DELETE' : 'POST' 
       });
       if (!res.ok) throw new Error(`Failed to ${action}`);
