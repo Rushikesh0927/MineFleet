@@ -17,6 +17,8 @@
 const BotProfile    = require('../modules/bot/BotProfile');
 const TaskManager   = require('../modules/tasks/TaskManager');
 
+const DEBUG = process.env.DEBUG_RECONNECT === 'true';
+
 const STATUS = {
   OFFLINE:      'OFFLINE',
   CONNECTING:   'CONNECTING',
@@ -37,6 +39,9 @@ class BotManager {
 
     // Per-bot TaskManager instances keyed by bot ID
     this.taskManagers = {};
+
+    // Pending startup timers keyed by bot ID
+    this.startupTimers = {};
 
     // Stored during initialize() for use in startBot() / restartBot()
     this.botEngine = null;
@@ -59,7 +64,7 @@ class BotManager {
     // Start every profile that is marked enabled
     for (const profile of this.getProfiles()) {
       if (profile.enabled) {
-        this.startBot(profile.id);
+        this._scheduleInitialStart(profile.id);
       }
     }
 
@@ -135,6 +140,13 @@ class BotManager {
       return;
     }
 
+    if (this.startupTimers[id]) {
+      if (DEBUG) {
+        console.log(`[BotManager][DEBUG] Skipping immediate start for ${profile.username}; startup already scheduled.`);
+      }
+      return;
+    }
+
     console.log(`[BotManager] Starting ${profile.username}`);
     this._setStatus(id, STATUS.CONNECTING);
     this.botEngine.createBot(profile);
@@ -150,6 +162,11 @@ class BotManager {
     if (!profile) {
       console.error(`[BotManager] ERROR: No profile found for id '${id}'`);
       return;
+    }
+
+    if (this.startupTimers[id]) {
+      clearTimeout(this.startupTimers[id]);
+      delete this.startupTimers[id];
     }
 
     console.log(`[BotManager] Stopping ${profile.username}`);
@@ -168,6 +185,11 @@ class BotManager {
     if (!profile) {
       console.error(`[BotManager] ERROR: No profile found for id '${id}'`);
       return;
+    }
+
+    if (this.startupTimers[id]) {
+      clearTimeout(this.startupTimers[id]);
+      delete this.startupTimers[id];
     }
 
     console.log(`[BotManager] Restarting ${profile.username}`);
@@ -373,6 +395,26 @@ class BotManager {
     const rt = this.runtimes[id];
     if (!rt) return;
     rt.status = status;
+  }
+
+  /**
+   * Schedules the first startup for a bot using a randomized stagger.
+   *
+   * @param {string} id
+   */
+  _scheduleInitialStart(id) {
+    const profile = this.profiles[id];
+    if (!profile || this.startupTimers[id]) return;
+
+    const delayMs = Math.floor(Math.random() * (30_000 - 2_000 + 1)) + 2_000;
+    this.startupTimers[id] = setTimeout(() => {
+      delete this.startupTimers[id];
+      this.startBot(id);
+    }, delayMs);
+
+    if (DEBUG) {
+      console.log(`[BotManager][DEBUG] ${new Date().toISOString()} | ${profile.username} | initial startup delay=${delayMs}ms`);
+    }
   }
 
   /**

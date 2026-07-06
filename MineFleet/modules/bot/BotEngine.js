@@ -28,6 +28,7 @@ const DEBUG = process.env.DEBUG_RECONNECT === 'true';
 // ─── Reconnect timing (item 3) ───────────────────────────────────────────────
 const RECONNECT_MIN_MS = 15_000;
 const RECONNECT_MAX_MS = 30_000;
+const KEEPALIVE_TIMEOUT_MS = 30_000;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function randMs(min, max) {
@@ -67,11 +68,22 @@ class BotEngine {
     // Per-bot last-known state strings (for previous-state logging)
     this._states = {};
 
+    // Per-bot previous state strings
+    this._previousStates = {};
+
     // Per-bot reconnect attempt counters
     this._reconnectAttempts = {};
 
     // Per-bot session start time (ms since epoch)
     this._sessionStart = {};
+
+    // Per-bot last disconnect / kick / error diagnostics
+    this._disconnectReasons = {};
+    this._kickReasons = {};
+    this._errorObjects = {};
+
+    // Per-bot keepAlive diagnostics
+    this._keepAlive = {};
 
     // Global reconnect / session statistics (item 12)
     this._stats = {
@@ -100,6 +112,35 @@ class BotEngine {
     this.eventManager   = eventManager;
     this.commandManager = commandManager;
 
+    this.eventManager.on('bot:end', ({ id, reason }) => {
+      this._disconnectReasons[id] = reason || 'unknown';
+    });
+
+    this.eventManager.on('bot:kicked', ({ id, reason, rawReason }) => {
+      this._kickReasons[id] = rawReason !== undefined ? rawReason : reason;
+
+      if (DEBUG) {
+        const name = this.bots[id]?.username || id;
+        dlog(
+          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=${this._states[id] || 'UNKNOWN'}` +
+          ` | prev=${this._previousStates[id] || 'NONE'} | KICKED | reason=${reason || 'unknown'}`,
+        );
+      }
+    });
+
+    this.eventManager.on('bot:error', ({ id, error }) => {
+      this._errorObjects[id] = error;
+
+      if (DEBUG) {
+        const name = this.bots[id]?.username || id;
+        const errorText = error && error.stack ? error.stack : (error && error.message) || String(error);
+        dlog(
+          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=${this._states[id] || 'UNKNOWN'}` +
+          ` | prev=${this._previousStates[id] || 'NONE'} | ERROR | error=${errorText}`,
+        );
+      }
+    });
+
     if (DEBUG) {
       dlog(`[BotEngine][DEBUG] ── Diagnostics enabled (DEBUG_RECONNECT=true) ── ${ts()}`);
       this._startEventLoopMonitor();  // item 10
@@ -126,17 +167,20 @@ class BotEngine {
 
     // ── Item 5: Prevent duplicate Mineflayer clients ──────────────────────
     const existing = this.bots[id];
-    if (existing) {
-      const clientAlive    = existing._client && !existing._client.ended;
-      const clientDestroyed = existing._client ? !!existing._client.ended : true;
-      const timerPending   = !!this.reconnectTimers[id];
+    const reconnectRunning = !!this.reconnectTimers[id];
+    const client = existing ? existing._client : null;
+    const clientExists = !!client;
+    const clientConnected = !!existing && !!client && !client.ended && !client.destroyed;
+    const clientDestroyed = !!client ? !!client.destroyed || !!client.ended : true;
 
+    if (existing || reconnectRunning || clientExists || clientConnected || !clientDestroyed) {
+      const prevState = this._previousStates[id] || this._states[id] || 'NONE';
       dlog(
-        `[BotEngine][DUPLICATE] ${ts()} | ${name} |` +
-        ` Skipping createBot(). Existing client already active.` +
-        ` | connected=${clientAlive} destroyed=${clientDestroyed} reconnectPending=${timerPending}`,
+        `[BotEngine][DUPLICATE] ${ts()} | ${name} | state=${this._states[id] || 'UNKNOWN'} | prev=${prevState}` +
+        ` | Skipping createBot(). Existing client already active.` +
+        ` | clientExists=${clientExists} connected=${clientConnected} destroyed=${clientDestroyed}` +
+        ` | reconnectRunning=${reconnectRunning}`,
       );
-      if (!DEBUG) console.log(`[BotEngine] Bot ${name} already running, skipping.`);
       return;
     }
 
@@ -188,17 +232,6 @@ class BotEngine {
         ` ${this._timings[id].loginAt - (this._timings[id].connectingAt || this._timings[id].createBotAt)}ms`,
       );
 
-      // Was this a successful reconnect? Record it.
-      if ((this._reconnectAttempts[id] || 0) > 0 && this._timings[id].reconnectStartedAt) {
-        const dur = Date.now() - this._timings[id].reconnectStartedAt;
-        this._stats.successfulReconnects++;
-        this._stats.totalReconnectDuration += dur;
-        dlog(
-          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | RECONNECT_COMPLETED` +
-          ` | attempt#=${this._reconnectAttempts[id]} duration=${dur}ms`,
-        );
-      }
-
       // Item 9: instrument keepAlive now that _client is available
       if (DEBUG) this._instrumentKeepAlive(bot, name, id);
     });
@@ -214,18 +247,42 @@ class BotEngine {
         ` ${this._timings[id].spawnAt - (this._timings[id].loginAt || this._timings[id].createBotAt)}ms`,
       );
 
-      this._setState(id, 'ONLINE', 'SPAWN');
-      dlog(
-        `[BotEngine][TIMING] ${name} | spawn→online:` +
-        ` ${Date.now() - this._timings[id].spawnAt}ms`,
-      );
-      dlog(
-        `[BotEngine][TIMING] ${name} | total createBot→online:` +
-        ` ${Date.now() - this._timings[id].createBotAt}ms`,
-      );
+      setImmediate(() => {
+        const readyPrev = this._states[id] || 'SPAWN';
+        this._timings[id].readyAt = Date.now();
+        this._setState(id, 'READY', readyPrev);
+        dlog(
+          `[BotEngine][TIMING] ${name} | spawn→ready:` +
+          ` ${this._timings[id].readyAt - this._timings[id].spawnAt}ms`,
+        );
 
-      // Item 8: listener count audit after fully online
-      if (DEBUG) this._auditListeners(bot, name);
+        setImmediate(() => {
+          const onlinePrev = this._states[id] || 'READY';
+          this._timings[id].onlineAt = Date.now();
+          this._setState(id, 'ONLINE', onlinePrev);
+          dlog(
+            `[BotEngine][TIMING] ${name} | ready→online:` +
+            ` ${this._timings[id].onlineAt - this._timings[id].readyAt}ms`,
+          );
+          dlog(
+            `[BotEngine][TIMING] ${name} | total createBot→online:` +
+            ` ${this._timings[id].onlineAt - this._timings[id].createBotAt}ms`,
+          );
+
+          if ((this._reconnectAttempts[id] || 0) > 0 && this._timings[id].reconnectStartedAt) {
+            const dur = this._timings[id].onlineAt - this._timings[id].reconnectStartedAt;
+            this._stats.successfulReconnects++;
+            this._stats.totalReconnectDuration += dur;
+            dlog(
+              `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=ONLINE | prev=${onlinePrev}` +
+              ` | RECONNECT_COMPLETED | attempt#=${this._reconnectAttempts[id]} duration=${dur}ms`,
+            );
+          }
+
+          // Item 8: listener count audit after fully online
+          if (DEBUG) this._auditListeners(bot, name);
+        });
+      });
     });
 
     // ── BotEngine's own 'end' handler (reconnect business logic) ──────────
@@ -244,6 +301,10 @@ class BotEngine {
         ? Date.now() - this._sessionStart[id]
         : null;
 
+      const disconnectReason = reason || this._disconnectReasons[id] || 'unknown';
+      const kickReason       = this._kickReasons[id] || null;
+      const errorObject      = this._errorObjects[id] || null;
+
       this._stats.totalDisconnects++;
       if (sessionUptime !== null) {
         this._stats.totalSessionUptime += sessionUptime;
@@ -252,13 +313,26 @@ class BotEngine {
 
       if (DEBUG) {
         const mem = process.memoryUsage();
-        dlog(`[BotEngine][DISCONNECT] ────────────────────────────────────────────`);
-        dlog(`[BotEngine][DISCONNECT] bot=${name} | ts=${ts()}`);
-        dlog(`[BotEngine][DISCONNECT] reason=${reason || 'unknown'} | prevState=${prevSt}`);
-        dlog(`[BotEngine][DISCONNECT] reconnectAttempt#=${this._reconnectAttempts[id] || 0}`);
-        dlog(`[BotEngine][DISCONNECT] sessionUptime=${sessionUptime !== null ? Math.round(sessionUptime / 1000) + 's' : 'N/A'}`);
-        dlog(`[BotEngine][DISCONNECT] rss=${Math.round(mem.rss / 1024 / 1024)}MB heapUsed=${Math.round(mem.heapUsed / 1024 / 1024)}MB heapTotal=${Math.round(mem.heapTotal / 1024 / 1024)}MB`);
-        dlog(`[BotEngine][DISCONNECT] ────────────────────────────────────────────`);
+        const report = {
+          timestamp: ts(),
+          bot: name,
+          currentState: 'DISCONNECTED',
+          previousState: prevSt,
+          disconnectReason,
+          kickReason,
+          errorObject: errorObject ? {
+            message: errorObject.message || String(errorObject),
+            name: errorObject.name || 'Error',
+            stack: errorObject.stack || null,
+          } : null,
+          reconnectAttempt: this._reconnectAttempts[id] || 0,
+          sessionUptimeMs: sessionUptime,
+          rssMb: Math.round(mem.rss / 1024 / 1024),
+          heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+        };
+
+        dlog(`[BotEngine][DISCONNECT] ${JSON.stringify(report)}`);
       }
 
       if (!profile.autoReconnect) return;
@@ -266,8 +340,8 @@ class BotEngine {
       // ── Item 4: prevent duplicate reconnect timers ────────────────────
       if (this.reconnectTimers[id]) {
         dlog(
-          `[BotEngine][RECONNECT] ${ts()} | ${name} |` +
-          ` Reconnect already scheduled. Ignoring duplicate reconnect request.`,
+          `[BotEngine][RECONNECT] ${ts()} | ${name} | state=DISCONNECTED | prev=${prevSt}` +
+          ` | Reconnect already scheduled. Ignoring duplicate reconnect request.`,
         );
         return;
       }
@@ -277,10 +351,11 @@ class BotEngine {
 
       this._timings[id].disconnectedAt      = Date.now();
       this._timings[id].reconnectScheduledAt = Date.now();
+      this._timings[id].reconnectDelayMs     = delayMs;
 
       dlog(
-        `[BotEngine][RECONNECT] ${ts()} | ${name} |` +
-        ` scheduling reconnect in ${(delayMs / 1000).toFixed(1)}s`,
+        `[BotEngine][RECONNECT] ${ts()} | ${name} | state=DISCONNECTED | prev=${prevSt}` +
+        ` | scheduling reconnect in ${(delayMs / 1000).toFixed(1)}s`,
       );
       dlog(
         `[BotEngine][TIMING] ${name} | disconnect→reconnect scheduled:` +
@@ -294,20 +369,31 @@ class BotEngine {
       console.log(`[BotEngine] ${name} reconnecting in ${(delayMs / 1000).toFixed(1)} seconds...`);
       this.eventManager.emit('bot:reconnecting', { id, username: name });
 
-      this.reconnectTimers[id] = setTimeout(() => {
+      this.reconnectTimers[id] = {
+        scheduledAt: this._timings[id].reconnectScheduledAt,
+        delayMs,
+        handle: null,
+      };
+
+      this.reconnectTimers[id].handle = setTimeout(() => {
+        const reconnectInfo = this.reconnectTimers[id];
         delete this.reconnectTimers[id];
 
         this._timings[id].reconnectStartedAt = Date.now();
 
-        const scheduled = this._timings[id].reconnectScheduledAt;
+        const scheduled = reconnectInfo ? reconnectInfo.scheduledAt : this._timings[id].reconnectScheduledAt;
         if (scheduled) {
           dlog(
-            `[BotEngine][TIMING] ${name} | reconnect scheduled→started:` +
+            `[BotEngine][TIMING] ${name} | reconnect scheduled→reconnect started:` +
             ` ${this._timings[id].reconnectStartedAt - scheduled}ms`,
           );
         }
 
         this._setState(id, 'RECONNECT_STARTED', 'RECONNECTING');
+        dlog(
+          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=RECONNECT_STARTED | prev=RECONNECTING` +
+          ` | Reconnect started.`,
+        );
         console.log(`[BotEngine] ${name} reconnect attempt...`);
         this.createBot(profile);
       }, delayMs);
@@ -342,13 +428,20 @@ class BotEngine {
     if (this._statsInterval)      { clearInterval(this._statsInterval);       this._statsInterval      = null; }
 
     for (const id of Object.keys(this.reconnectTimers)) {
-      clearTimeout(this.reconnectTimers[id]);
+      const info = this.reconnectTimers[id];
+      clearTimeout(info && info.handle ? info.handle : info);
       delete this.reconnectTimers[id];
     }
 
     for (const [id, bot] of Object.entries(this.bots)) {
       const name = bot.username || id;
       console.log(`Disconnecting ${name}...`);
+      if (DEBUG) {
+        dlog(
+          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=${this._states[id] || 'UNKNOWN'}` +
+          ` | prev=${this._previousStates[id] || 'NONE'} | DESTROY | shutdown requested`,
+        );
+      }
       try { bot.quit(); } catch (_) {}
       delete this.bots[id];
       delete this.movementManagers[id];
@@ -360,13 +453,21 @@ class BotEngine {
    */
   removeBot(id) {
     if (this.reconnectTimers[id]) {
-      clearTimeout(this.reconnectTimers[id]);
+      const info = this.reconnectTimers[id];
+      clearTimeout(info && info.handle ? info.handle : info);
       delete this.reconnectTimers[id];
     }
 
     const bot = this.bots[id];
     if (bot) {
       this.eventManager.unregister(bot);
+      if (DEBUG) {
+        const name = bot.username || id;
+        dlog(
+          `[BotEngine][LIFECYCLE] ${ts()} | ${name} | state=${this._states[id] || 'UNKNOWN'}` +
+          ` | prev=${this._previousStates[id] || 'NONE'} | DESTROY | removeBot()`,
+        );
+      }
       bot.quit();
       delete this.bots[id];
       delete this.movementManagers[id];
@@ -395,9 +496,10 @@ class BotEngine {
 
   /** Convenience: set and log a state transition (item 1). */
   _setState(id, newState, prevState) {
+    this._previousStates[id] = prevState;
     this._states[id] = newState;
     const name = this.bots[id]?.username || id;
-    dlog(`[BotEngine][LIFECYCLE] ${ts()} | ${name || id} | ${newState} | prev=${prevState}`);
+    dlog(`[BotEngine][LIFECYCLE] ${ts()} | ${name || id} | state=${newState} | prev=${prevState}`);
   }
 
   /**
@@ -412,18 +514,51 @@ class BotEngine {
       return;
     }
 
-    const ka = { lastReceived: null, count: 0, gaps: [] };
+    const ka = {
+      lastReceived: null,
+      lastReplied: null,
+      count: 0,
+      gaps: [],
+      timeoutMs: bot._client.keepAliveTimeout || KEEPALIVE_TIMEOUT_MS,
+      timeoutAt: null,
+    };
+
+    this._keepAlive[id] = ka;
+
+    const originalWrite = bot._client.write.bind(bot._client);
+    bot._client.write = (...args) => {
+      const packetName = args[0];
+      if (packetName === 'keep_alive' || packetName === 'keep_alive_response') {
+        const now = Date.now();
+        ka.lastReplied = now;
+        const replyGap = ka.lastReceived !== null ? now - ka.lastReceived : null;
+        dlog(
+          `[BotEngine][KEEPALIVE] ${name}` +
+          ` | reply=${packetName}` +
+          ` | lastReceived=${ka.lastReceived ? new Date(ka.lastReceived).toISOString() : 'never'}` +
+          ` | lastReplied=${new Date(now).toISOString()}` +
+          ` | replyGap=${replyGap !== null ? replyGap + 'ms' : 'n/a'}` +
+          ` | ping=${bot._client.latency ?? 'n/a'}ms` +
+          ` | timeoutCountdown=${ka.lastReceived !== null ? Math.max(0, ka.timeoutMs - (now - ka.lastReceived)) + 'ms' : ka.timeoutMs + 'ms'}` +
+          ` | ts=${ts()}`,
+        );
+      }
+      return originalWrite(...args);
+    };
 
     bot._client.on('keep_alive', (packet) => {
       const now  = Date.now();
       const gap  = ka.lastReceived !== null ? now - ka.lastReceived : null;
       ka.lastReceived = now;
       ka.count++;
+      ka.timeoutAt = now + ka.timeoutMs;
       if (gap !== null) ka.gaps.push(gap);
 
       const avgGap = ka.gaps.length > 0
         ? Math.round(ka.gaps.reduce((a, b) => a + b, 0) / ka.gaps.length)
         : null;
+      const ping = bot._client.latency ?? null;
+      const countdown = Math.max(0, ka.timeoutMs - (now - ka.lastReceived));
 
       dlog(
         `[BotEngine][KEEPALIVE] ${name}` +
@@ -431,6 +566,10 @@ class BotEngine {
         ` | id=${packet.keepAliveId ?? packet.id ?? '?'}` +
         ` | gap=${gap !== null ? gap + 'ms' : 'first'}` +
         ` | avgGap=${avgGap !== null ? avgGap + 'ms' : 'n/a'}` +
+        ` | lastReceived=${new Date(now).toISOString()}` +
+        ` | lastReplied=${ka.lastReplied ? new Date(ka.lastReplied).toISOString() : 'never'}` +
+        ` | ping=${ping !== null ? ping + 'ms' : 'n/a'}` +
+        ` | timeoutCountdown=${countdown}ms` +
         ` | ts=${ts()}`,
       );
     });
@@ -445,8 +584,23 @@ class BotEngine {
         (isTimeout ? ' | ⚠️  KEEPALIVE TIMEOUT' : '') +
         ` | totalKA=${ka.count}` +
         ` | lastReceived=${ka.lastReceived ? new Date(ka.lastReceived).toISOString() : 'never'}` +
+        ` | lastReplied=${ka.lastReplied ? new Date(ka.lastReplied).toISOString() : 'never'}` +
+        ` | timeoutCountdown=${ka.lastReceived !== null ? Math.max(0, ka.timeoutMs - (Date.now() - ka.lastReceived)) + 'ms' : ka.timeoutMs + 'ms'}` +
+        ` | ping=${bot._client ? (bot._client.latency ?? 'n/a') + 'ms' : 'n/a'}` +
         ` | ts=${ts()}`,
       );
+
+      if (isTimeout) {
+        dlog(
+          `[BotEngine][KEEPALIVE] ${name} | timeout diagnostics` +
+          ` | lastReceived=${ka.lastReceived ? new Date(ka.lastReceived).toISOString() : 'never'}` +
+          ` | lastReplied=${ka.lastReplied ? new Date(ka.lastReplied).toISOString() : 'never'}` +
+          ` | avgGap=${ka.gaps.length > 0 ? Math.round(ka.gaps.reduce((a, b) => a + b, 0) / ka.gaps.length) + 'ms' : 'n/a'}` +
+          ` | ping=${bot._client ? (bot._client.latency ?? 'n/a') + 'ms' : 'n/a'}` +
+          ` | timeoutMs=${ka.timeoutMs}` +
+          ` | ts=${ts()}`,
+        );
+      }
     });
   }
 
@@ -464,9 +618,9 @@ class BotEngine {
       if (counts[ev] > 1) warned = true;
     }
 
-    dlog(`[BotEngine][LISTENERS] ${name} | ${JSON.stringify(counts)}`);
+    dlog(`[BotEngine][LISTENERS] ${ts()} | ${name} | state=${this._states[bot._minefleetId] || 'UNKNOWN'} | prev=${this._previousStates[bot._minefleetId] || 'NONE'} | counts=${JSON.stringify(counts)}`);
     if (warned) {
-      dlog(`[BotEngine][LISTENERS] ⚠️  ${name} | Listener count > 1 detected — possible listener leak!`);
+      dlog(`[BotEngine][LISTENERS] ⚠️  ${ts()} | ${name} | state=${this._states[bot._minefleetId] || 'UNKNOWN'} | prev=${this._previousStates[bot._minefleetId] || 'NONE'} | Listener count > 1 detected — possible listener leak!`);
       for (const [ev, n] of Object.entries(counts)) {
         if (n > 1) dlog(`  → ${ev}: ${n} listeners`);
       }
@@ -490,7 +644,9 @@ class BotEngine {
       if (delay > WARN_THRESHOLD) {
         dlog(
           `[BotEngine][EVENTLOOP] ⚠️  Loop delayed` +
-          ` | expected=1000ms actual=${actual}ms delay=${delay}ms | ts=${ts()}`,
+          ` | expected=1000ms actual=${actual}ms delay=${delay}ms` +
+          ` | activeHandles=${process._getActiveHandles ? process._getActiveHandles().length : 'n/a'}` +
+          ` | ts=${ts()}`,
         );
       }
       last = now;
@@ -505,44 +661,51 @@ class BotEngine {
   _startRegistryDump() {
     this._registryInterval = setInterval(() => {
       const lines = [`[BotEngine][REGISTRY] ── Bot Registry Dump ${ts()} ──`];
-      let totalOnline = 0, totalReconnecting = 0;
+      let totalOnline = 0;
+      let totalOffline = 0;
+      let totalReconnecting = 0;
 
-      for (const [id, bot] of Object.entries(this.bots)) {
-        const state     = this._states[id] || 'UNKNOWN';
-        const hasTimer  = !!this.reconnectTimers[id];
-        const destroyed = bot._client ? !!bot._client.ended : true;
-        const evts      = ['login', 'spawn', 'end', 'error', 'kicked', 'health'];
+      const ids = new Set([
+        ...Object.keys(this._states),
+        ...Object.keys(this.bots),
+        ...Object.keys(this.reconnectTimers),
+      ]);
+
+      for (const id of ids) {
+        const bot = this.bots[id] || null;
+        const state = this._states[id] || 'UNKNOWN';
+        const timerInfo = this.reconnectTimers[id] || null;
+        const client = bot ? bot._client : null;
+        const clientExists = !!client;
+        const clientDestroyed = client ? !!client.destroyed || !!client.ended : true;
+        const connected = client ? !client.destroyed && !client.ended : false;
+        const reconnecting = state === 'RECONNECTING' || state === 'RECONNECT_STARTED' || !!timerInfo;
+        const remainingReconnectDelay = timerInfo ? Math.max(0, timerInfo.delayMs - (Date.now() - timerInfo.scheduledAt)) : 0;
         const listeners = {};
-        for (const e of evts) listeners[e] = bot.listenerCount(e);
+
+        for (const eventName of ['login', 'spawn', 'end', 'error', 'kicked', 'health', 'physicsTick', 'message']) {
+          listeners[eventName] = bot ? bot.listenerCount(eventName) : 0;
+        }
 
         if (state === 'ONLINE') totalOnline++;
-        else if (state === 'RECONNECTING' || state === 'RECONNECT_STARTED') totalReconnecting++;
+        else if (state === 'RECONNECTING' || state === 'RECONNECT_STARTED' || timerInfo) totalReconnecting++;
+        else totalOffline++;
 
         lines.push(
-          `  ${bot.username || id}` +
+          `  ${bot ? bot.username : id}` +
           ` | state=${state}` +
-          ` | clientDestroyed=${destroyed}` +
-          ` | reconnectTimer=${hasTimer}` +
+          ` | connected=${connected}` +
+          ` | reconnecting=${reconnecting}` +
+          ` | clientExists=${clientExists}` +
+          ` | clientDestroyed=${clientDestroyed}` +
+          ` | reconnectTimerActive=${!!timerInfo}` +
+          ` | remainingReconnectDelay=${remainingReconnectDelay}ms` +
           ` | attempt#=${this._reconnectAttempts[id] || 0}` +
           ` | listeners=${JSON.stringify(listeners)}`,
         );
       }
 
-      // Bots with a pending timer but no active client
-      for (const id of Object.keys(this.reconnectTimers)) {
-        if (!this.bots[id]) {
-          totalReconnecting++;
-          lines.push(
-            `  ${id}` +
-            ` | state=TIMER_PENDING` +
-            ` | client=none` +
-            ` | attempt#=${this._reconnectAttempts[id] || 0}`,
-          );
-        }
-      }
-
-      const total = Object.keys(this.bots).length + Object.keys(this.reconnectTimers).filter(id => !this.bots[id]).length;
-      lines.push(`  TOTALS: tracked=${total} | online=${totalOnline} | reconnecting=${totalReconnecting}`);
+      lines.push(`  TOTALS: totalBots=${ids.size} | online=${totalOnline} | offline=${totalOffline} | reconnecting=${totalReconnecting}`);
       dlog(lines.join('\n'));
     }, 30_000);
 

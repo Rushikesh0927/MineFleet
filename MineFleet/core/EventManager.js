@@ -82,12 +82,12 @@ class EventManager {
     bind('kicked', (reason) => {
       const reasonText = _readableReason(reason);
       console.log(`[EventManager] ${name} was kicked. Reason: ${reasonText}`);
-      this.emit('bot:kicked', { id, username: name, reason: reasonText });
+      this.emit('bot:kicked', { id, username: name, reason: reasonText, rawReason: reason });
     });
 
     bind('error', (err) => {
       console.log(`[EventManager] ${name} error: ${err.message || err}`);
-      this.emit('bot:error', { id, username: name, error: err.message || String(err) });
+      this.emit('bot:error', { id, username: name, error: err, errorMessage: err.message || String(err) });
     });
 
     bind('death', () => {
