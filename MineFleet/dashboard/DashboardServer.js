@@ -11,6 +11,9 @@
  *   GET /api/bots/:id  — single bot status
  *   GET /api/plugins   — loaded plugins
  *   GET /api/config    — application configuration
+ *   GET /api/tasks     — task queues for all bots
+ *   GET /api/logs      — recent log ring buffer (last 500 entries)
+ *   GET /api/system    — process / platform metrics
  *
  * Default port: 3000 (overridden by DASHBOARD_PORT env var)
  */
@@ -18,6 +21,54 @@
 const express = require('express');
 
 const DEFAULT_PORT = 3000;
+
+// ---------------------------------------------------------------------------
+// Module-level log ring buffer — captures console output platform-wide
+// ---------------------------------------------------------------------------
+const _logBuffer = [];
+let _logId = 0;
+const MAX_LOG_ENTRIES = 500;
+
+function _captureLog(level, args) {
+  const message = args
+    .map(a => (typeof a === 'string' ? a : JSON.stringify(a)))
+    .join(' ');
+  _logBuffer.push({
+    id: ++_logId,
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+  });
+  if (_logBuffer.length > MAX_LOG_ENTRIES) _logBuffer.shift();
+}
+
+let _interceptorInstalled = false;
+function _installLogInterceptor() {
+  if (_interceptorInstalled) return;
+  _interceptorInstalled = true;
+
+  const _origLog   = console.log.bind(console);
+  const _origWarn  = console.warn.bind(console);
+  const _origError = console.error.bind(console);
+
+  console.log   = (...args) => { _origLog(...args);   _captureLog('info',  args); };
+  console.warn  = (...args) => { _origWarn(...args);  _captureLog('warn',  args); };
+  console.error = (...args) => { _origError(...args); _captureLog('error', args); };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function _formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 class DashboardServer {
   /**
@@ -33,7 +84,6 @@ class DashboardServer {
     this.app    = express();
     this.server = null;
 
-    // Record when the server started for uptime reporting
     this.startedAt = null;
   }
 
@@ -41,6 +91,7 @@ class DashboardServer {
    * Registers all routes and starts the HTTP server.
    */
   initialize() {
+    _installLogInterceptor();
     this._registerRoutes();
 
     const port = parseInt(process.env.DASHBOARD_PORT, 10) || DEFAULT_PORT;
@@ -69,8 +120,20 @@ class DashboardServer {
   _registerRoutes() {
     const app = this.app;
 
-    // Force JSON responses
     app.use(express.json());
+
+    // CORS — allow the Replit proxy / same-origin frontend
+    app.use((_req, res, next) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (_req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+      }
+      next();
+    });
+
+    // ── Existing endpoints ──────────────────────────────────────────────────
 
     // GET / — API identification
     app.get('/', (_req, res) => {
@@ -118,6 +181,109 @@ class DashboardServer {
     // GET /api/config — application configuration
     app.get('/api/config', (_req, res) => {
       res.json(this.configManager.getAppConfig());
+    });
+
+    // ── New endpoints ───────────────────────────────────────────────────────
+
+    // GET /api/tasks — task queues for every registered bot
+    app.get('/api/tasks', (_req, res) => {
+      const result = [];
+      for (const profile of this.botManager.getProfiles()) {
+        let active = null;
+        let queue  = [];
+        try {
+          const tm = this.botManager.getTaskManager(profile.id);
+          const a  = tm.getActive();
+          active = a ? {
+            id:           a.id,
+            name:         a.name,
+            state:        a.state,
+            priority:     a.priority,
+            interruptible: a.interruptible,
+            createdAt:    a.createdAt,
+          } : null;
+          queue = (tm.getQueue() || []).map(t => ({
+            id:           t.id,
+            name:         t.name,
+            state:        t.state,
+            priority:     t.priority,
+            interruptible: t.interruptible,
+            createdAt:    t.createdAt,
+          }));
+        } catch (_e) {
+          // Bot may not be fully initialised yet — skip gracefully
+        }
+        result.push({
+          botId:       profile.id,
+          botUsername: profile.username,
+          active,
+          queue,
+        });
+      }
+      res.json(result);
+    });
+
+    // GET /api/logs — recent log ring buffer
+    // Query params: limit (default 200, max 500), level (info|warn|error), search
+    app.get('/api/logs', (req, res) => {
+      const limit  = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+      const level  = req.query.level  || null;
+      const search = req.query.search || null;
+
+      let entries = [..._logBuffer];
+      if (level)  entries = entries.filter(e => e.level === level);
+      if (search) {
+        const s = search.toLowerCase();
+        entries = entries.filter(e => e.message.toLowerCase().includes(s));
+      }
+
+      res.json(entries.slice(-limit));
+    });
+
+    // GET /api/system — process / platform metrics
+    app.get('/api/system', (_req, res) => {
+      const uptimeSeconds = this.startedAt
+        ? Math.floor((Date.now() - this.startedAt) / 1000)
+        : 0;
+
+      const appConfig  = this.configManager.getAppConfig() || {};
+      const mem        = process.memoryUsage();
+
+      let totalBots    = 0;
+      let onlineBots   = 0;
+      let totalPlugins = 0;
+
+      try {
+        totalBots  = this.botManager.getProfiles().length;
+        onlineBots = this.botManager
+          .getStatuses()
+          .filter(s => s.status === 'ONLINE').length;
+      } catch (_e) {}
+
+      try {
+        totalPlugins = Object.keys(this.pluginManager.plugins).length;
+      } catch (_e) {}
+
+      res.json({
+        status:          'ok',
+        name:            appConfig.name    || 'MineFleet',
+        version:         appConfig.version || 'unknown',
+        uptime:          uptimeSeconds,
+        uptimeFormatted: _formatUptime(uptimeSeconds),
+        nodeVersion:     process.version,
+        platform:        process.platform,
+        memory: {
+          usedMb:  Math.round(mem.heapUsed  / 1024 / 1024),
+          totalMb: Math.round(mem.heapTotal / 1024 / 1024),
+          rssMb:   Math.round(mem.rss       / 1024 / 1024),
+        },
+        bots: {
+          total:  totalBots,
+          online: onlineBots,
+        },
+        plugins:    totalPlugins,
+        logEntries: _logBuffer.length,
+      });
     });
   }
 }
