@@ -82,8 +82,9 @@ function BotCard({ bot, activeTask }: { bot: BotStatus; activeTask: string | nul
           </Button>
           </div>
         </div>
+      </div>
 
-        {/* Server */}
+      {/* Server */}
         {bot.server && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
             <Server className="w-3 h-3 shrink-0" />

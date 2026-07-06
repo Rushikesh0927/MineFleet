@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CommandPanel } from "@/components/CommandPanel";
+import InventoryPanel from "@/components/InventoryPanel";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -249,6 +250,22 @@ export default function BotDetail() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Inventory Panel (Phase 2.6) */}
+      <div className="bg-card border border-card-border rounded-lg">
+         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+           <h3 className="text-sm font-semibold text-foreground">Inventory</h3>
+         </div>
+         <div className="p-4 overflow-x-auto">
+            {bot.status === 'ONLINE' ? (
+               <InventoryPanel botId={id} />
+            ) : (
+               <div className="flex flex-col items-center justify-center py-6 text-muted-foreground">
+                  <p className="text-sm">Bot must be online to view inventory.</p>
+               </div>
+            )}
+         </div>
       </div>
 
       {/* Command Panel (Phase 2.2) */}

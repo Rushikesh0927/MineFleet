@@ -43,6 +43,10 @@ const JumpTask   = require('../modules/tasks/JumpTask');
 const SneakTask  = require('../modules/tasks/SneakTask');
 const AttackTask = require('../modules/tasks/AttackTask');
 const BotActionTask = require('../modules/tasks/BotActionTask');
+const MoveItemTask = require('../modules/tasks/MoveItemTask');
+const EquipTask = require('../modules/tasks/EquipTask');
+const DropTask = require('../modules/tasks/DropTask');
+const ConsumeTask = require('../modules/tasks/ConsumeTask');
 const { fleetLog } = require('../modules/FleetLogger');
 const ConsoleBuffer = require('../core/ConsoleBuffer');
 
@@ -657,6 +661,105 @@ class DashboardServer {
       } catch (err) {
         fleetLog(`CMD_${cmd.command?.toUpperCase() || 'UNKNOWN'}`, id, profile.username, 'fail', { error: err.message });
         res.status(500).json(_errResponse(`Command failed: ${err.message}`, 500));
+      }
+    });
+
+    // ── Phase 2.6: Inventory Management Endpoints ───────────────────────────
+
+    // GET /api/bots/:id/inventory — expose real-time inventory state
+    app.get('/api/bots/:id/inventory', (req, res) => {
+      const id = req.params.id;
+      const liveBot = this.botManager.botEngine?.getBot(id);
+      
+      if (!liveBot) {
+        return res.status(404).json(_errResponse(`Bot '${id}' is offline or not found`, 404));
+      }
+
+      try {
+        const inv = liveBot.inventory;
+        const slots = inv.slots.map((item, index) => {
+          if (!item) return { slot: index, empty: true };
+          return {
+            slot: index,
+            name: item.name,
+            displayName: item.displayName,
+            count: item.count,
+            type: item.type,
+            maxDurability: item.maxDurability,
+            durabilityUsed: item.durabilityUsed
+          };
+        });
+
+        res.json({
+          slots,
+          quickBarSlot: liveBot.quickBarSlot,
+          equipment: {
+            head: liveBot.equipment[5] ? liveBot.equipment[5].name : null,
+            torso: liveBot.equipment[6] ? liveBot.equipment[6].name : null,
+            legs: liveBot.equipment[7] ? liveBot.equipment[7].name : null,
+            feet: liveBot.equipment[8] ? liveBot.equipment[8].name : null,
+            'off-hand': liveBot.equipment[45] ? liveBot.equipment[45].name : null,
+            hand: liveBot.heldItem ? liveBot.heldItem.name : null
+          }
+        });
+      } catch (err) {
+        res.status(500).json(_errResponse(`Failed to read inventory: ${err.message}`, 500));
+      }
+    });
+
+    // POST /api/bots/:id/inventory/action — dispatch inventory tasks
+    app.post('/api/bots/:id/inventory/action', (req, res) => {
+      const id = req.params.id;
+      const action = req.body;
+      const profile = this.botManager.getProfile(id);
+
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      const liveBot = this.botManager.botEngine?.getBot(id);
+      const status = this.botManager.getStatus(id)?.status;
+
+      if (!liveBot || status !== 'ONLINE') {
+        return res.status(400).json(_errResponse(`Bot '${id}' is offline or reconnecting`, 400));
+      }
+
+      let task = null;
+      try {
+        switch (action.type) {
+          case 'move':
+            if (action.sourceSlot === undefined || action.destSlot === undefined) {
+              return res.status(400).json(_errResponse('Missing sourceSlot or destSlot'));
+            }
+            task = new MoveItemTask(liveBot, Number(action.sourceSlot), Number(action.destSlot));
+            break;
+          case 'equip':
+            if (!action.destination || action.itemId === undefined) {
+              return res.status(400).json(_errResponse('Missing destination or itemId'));
+            }
+            task = new EquipTask(liveBot, action.destination, Number(action.itemId));
+            break;
+          case 'drop':
+            if (action.slotId === undefined) {
+              return res.status(400).json(_errResponse('Missing slotId'));
+            }
+            task = new DropTask(liveBot, Number(action.slotId), action.count ? Number(action.count) : undefined);
+            break;
+          case 'consume':
+            task = new ConsumeTask(liveBot);
+            break;
+          default:
+            return res.status(400).json(_errResponse(`Unknown inventory action: ${action.type}`));
+        }
+
+        if (task) {
+          this.botManager.assignTask(id, task);
+          fleetLog(`CMD_INVENTORY_${action.type.toUpperCase()}`, id, profile.username, 'ok', { params: action });
+          res.json(_okResponse(`CMD_INVENTORY_${action.type.toUpperCase()}`, id, profile.username, { params: action }));
+        }
+      } catch (err) {
+        fleetLog(`CMD_INVENTORY_${action.type?.toUpperCase() || 'UNKNOWN'}`, id, profile.username, 'fail', { error: err.message });
+        res.status(500).json(_errResponse(`Inventory action failed: ${err.message}`, 500));
       }
     });
 

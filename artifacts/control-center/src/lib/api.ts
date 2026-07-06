@@ -140,6 +140,56 @@ export async function sendCommand(id: string, cmd: any) {
   return res.json();
 }
 
+export interface InventoryItem {
+  slot: number;
+  empty?: boolean;
+  name?: string;
+  displayName?: string;
+  count?: number;
+  type?: number;
+  maxDurability?: number;
+  durabilityUsed?: number;
+}
+
+export interface InventoryState {
+  slots: InventoryItem[];
+  quickBarSlot: number;
+  equipment: {
+    head: string | null;
+    torso: string | null;
+    legs: string | null;
+    feet: string | null;
+    'off-hand': string | null;
+    hand: string | null;
+  };
+}
+
+export function useInventory(id: string) {
+  return useQuery<InventoryState>({
+    queryKey: ["inventory", id],
+    queryFn: () => apiFetch(`/api/bots/${id}/inventory`),
+    refetchInterval: POLL,
+    enabled: !!id,
+  });
+}
+
+export async function sendInventoryAction(id: string, action: any) {
+  const res = await fetch(`/api/bots/${id}/inventory/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action),
+  });
+  if (!res.ok) {
+    let err = `Error ${res.status}`;
+    try {
+      const data = await res.json();
+      err = data.error || err;
+    } catch (e) {}
+    throw new Error(err);
+  }
+  return res.json();
+}
+
 export function usePlugins() {
   return useQuery<Plugin[]>({
     queryKey: ["plugins"],
