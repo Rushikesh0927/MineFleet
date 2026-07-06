@@ -1,0 +1,84 @@
+CONTINUE FROM LAST CHECKPOINT — DO NOT RESTART OR REDESIGN
+
+Project: MineFleet Control Center (multi-bot Mineflayer system on Replit)
+
+Context:
+- MineFleet Control Center is fully working (dashboard backend, REST APIs, multi-bot system, automatic reconnect, Google Apps Script keep-alive).
+- Five bots successfully connect to the Minecraft server.
+- The previous session stopped mid-way while adding reconnect diagnostics.
+- This prompt resumes that unfinished work. Do NOT rebuild or redesign anything that already works.
+
+Bug being investigated:
+- While the MineFleet Control Center webpage stays open, all five bots remain online indefinitely.
+- After the webpage is closed, bots start disconnecting after some time.
+- Replit console shows: "client timed out after 30000 milliseconds", "keepAliveError", "socketClosed".
+- Aternos server logs show: "Timed out", "Connection throttled! Please wait before reconnecting."
+- Sometimes only two bots stay online while others reconnect in a loop.
+- Sometimes duplicate login events appear for the same bot.
+- Root cause is still unknown — this task is about instrumenting the code well enough to find it, not guessing at a fix yet.
+
+TASK: Implement the following 14 items, in order, without altering existing working functionality.
+
+1. Reconnect debugging — add lifecycle logging for every bot covering: creation, connecting, login, spawn, ready, online, disconnect, error, kicked, destroy, reconnect scheduled, reconnect started, reconnect completed. Every log line must include timestamp, bot username, current state, previous state.
+
+2. Randomized startup delay — each bot gets an independent random delay of 2–30s before its first connect (not all bots connecting at once). Log the assigned delay per bot.
+
+3. Randomized reconnect delay — replace any fixed reconnect delay with an independent random 15–30s delay per bot per reconnect. Log the delay before scheduling.
+
+4. Prevent duplicate reconnect timers — each bot may have only one active reconnect timer. If a second reconnect is requested while one is pending, ignore it and log: "Reconnect already scheduled. Ignoring duplicate reconnect request."
+
+5. Prevent duplicate Mineflayer clients — before calling createBot(), check for an existing client, its connected state, destroyed state, and whether a reconnect is already running. Never spin up two clients for the same username. If one exists, log: "Skipping createBot(). Existing client already active."
+
+6. Disconnect diagnostics — on every disconnect, print a structured report: bot name, disconnect reason, kick reason, error object, reconnect attempt number, session uptime, RSS memory, heap usage, timestamp.
+
+7. Connection timing diagnostics — measure and log durations for: createBot→connecting, connecting→login, login→spawn, spawn→ready, ready→online, disconnect→reconnect scheduled, reconnect scheduled→reconnect started, reconnect started→online.
+
+8. Duplicate event listener detection — after each bot initializes, print listener counts for: login, spawn, end, error, kicked, health, physicsTick, message. Warn if any count exceeds 1.
+
+9. KeepAlive diagnostics — instrument Mineflayer's keepAlive handling. Log last keepAlive received, last keepAlive replied, time between packets, ping, and timeout countdown. On a keepAlive timeout, dump all related diagnostic info.
+
+10. Event loop monitoring — add a lightweight monitor that measures event loop delay every second. If delay exceeds 1000ms, log expected delay, actual delay, and timestamp (to check if the Node process is being blocked/paused, e.g. by Replit sleeping the tab-driven process).
+
+11. Periodic bot registry dump — every 30 seconds, print per-bot: username, current state, connected, reconnecting, client exists, client destroyed, reconnect timer active, remaining reconnect delay, listener counts. Include totals: total bots, online, offline, reconnecting.
+
+12. Reconnect statistics — track and print every 60 seconds: total reconnect attempts, successful reconnects, failed reconnects, average reconnect duration, total disconnects, average session uptime.
+
+13. Root cause investigation — instrument (don't guess) to determine why disconnects correlate with the dashboard webpage closing. Specifically log/inspect: dashboard polling dependency, Express request activity, browser connection activity, event loop blocking, idle timers, WebSocket usage, internal timers, duplicate reconnect scheduling, duplicate Mineflayer clients, duplicate listeners, and any code path where bot activity is inadvertently tied to an active HTTP request or open browser tab (a common Replit-specific gotcha: some Repls only stay "awake"/unthrottled while there's inbound HTTP traffic, so closing the tab can starve background timers).
+
+14. Debug mode flag — gate ALL new diagnostics behind a single debug flag (e.g. DEBUG_RECONNECT=true). When disabled, behavior must be identical to the current working version.
+
+DO NOT MODIFY:
+- Dashboard UI
+- REST APIs
+- Plugins
+- Task Scheduler
+- Movement System
+- Pathfinder
+- Any existing bot functionality
+
+ONLY MODIFY:
+- Reconnect scheduling
+- Startup scheduling
+- Diagnostics/logging
+- Debugging instrumentation
+- Stability investigation code
+
+VERIFY BEFORE FINISHING:
+✓ Startup connections are staggered
+✓ Reconnects are staggered
+✓ Duplicate reconnect timers cannot exist
+✓ Duplicate Mineflayer clients cannot exist
+✓ Listener counts remain stable (no growth over time)
+✓ KeepAlive diagnostics work
+✓ Event loop monitoring works
+✓ Registry dump prints every 30s
+✓ Reconnect issue is now fully diagnosable from logs alone
+
+AT THE END, PROVIDE:
+1. List of files modified and why
+2. Sample debug output (a real snippet from a test run)
+3. Root cause discovered (if found) during testing
+4. Any remaining unresolved issues
+5. Recommendation for the permanent fix
+
+Continue until all 14 items are fully implemented — do not stop partway through.
