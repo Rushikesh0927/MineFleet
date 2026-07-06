@@ -37,6 +37,12 @@
 const express    = require('express');
 const FollowTask = require('../modules/tasks/FollowTask');
 const GotoTask   = require('../modules/tasks/GotoTask');
+const LookAtTask = require('../modules/tasks/LookAtTask');
+const StopTask   = require('../modules/tasks/StopTask');
+const JumpTask   = require('../modules/tasks/JumpTask');
+const SneakTask  = require('../modules/tasks/SneakTask');
+const AttackTask = require('../modules/tasks/AttackTask');
+const BotActionTask = require('../modules/tasks/BotActionTask');
 const { fleetLog } = require('../modules/FleetLogger');
 
 const DEFAULT_PORT = 3000;
@@ -492,6 +498,89 @@ class DashboardServer {
 
       const profile = this.botManager.getProfile(id);
       res.json(_okResponse('AUTORECONNECT', id, profile?.username || id, { autoReconnect: enabled }));
+    });
+
+    // POST /api/bots/:id/command — phase 2.2 remote commands
+    app.post('/api/bots/:id/command', (req, res) => {
+      const id = req.params.id;
+      const cmd = req.body;
+      const profile = this.botManager.getProfile(id);
+
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      const liveBot = this.botManager.botEngine?.getBot(id);
+      const status = this.botManager.getStatus(id)?.status;
+
+      if (!liveBot || status !== 'ONLINE') {
+        return res.status(400).json(_errResponse(`Bot '${id}' is offline or reconnecting`, 400));
+      }
+
+      const mm = this.botManager.getMovementManager(id);
+      let task = null;
+
+      try {
+        switch (cmd.command) {
+          case 'goto':
+            if (cmd.x === undefined || cmd.y === undefined || cmd.z === undefined) {
+              return res.status(400).json(_errResponse('Missing x, y, or z parameters for goto'));
+            }
+            if (!mm) return res.status(400).json(_errResponse('Movement system not available'));
+            task = new GotoTask(Number(cmd.x), Number(cmd.y), Number(cmd.z), mm);
+            break;
+          case 'follow':
+            if (!cmd.target) return res.status(400).json(_errResponse('Missing target parameter for follow'));
+            if (!mm) return res.status(400).json(_errResponse('Movement system not available'));
+            const playerEntry = liveBot.players[cmd.target];
+            if (!playerEntry || !playerEntry.entity) {
+              return res.status(400).json(_errResponse(`Player "${cmd.target}" not found or not in range`));
+            }
+            task = new FollowTask(playerEntry.entity, cmd.target, mm);
+            break;
+          case 'look':
+            if (cmd.x === undefined || cmd.y === undefined || cmd.z === undefined) {
+              return res.status(400).json(_errResponse('Missing x, y, or z parameters for look'));
+            }
+            if (!mm) return res.status(400).json(_errResponse('Movement system not available'));
+            task = new LookAtTask(Number(cmd.x), Number(cmd.y), Number(cmd.z), mm);
+            break;
+          case 'stop':
+            if (!mm) return res.status(400).json(_errResponse('Movement system not available'));
+            task = new StopTask(mm);
+            break;
+          case 'jump':
+            task = new JumpTask(liveBot);
+            break;
+          case 'sneak':
+            task = new SneakTask(liveBot, !!cmd.enabled);
+            break;
+          case 'attack':
+            task = new AttackTask(liveBot, cmd.target);
+            break;
+          case 'mine':
+          case 'place':
+            if (cmd.x === undefined || cmd.y === undefined || cmd.z === undefined) {
+              return res.status(400).json(_errResponse(`Missing x, y, or z parameters for ${cmd.command}`));
+            }
+            task = new BotActionTask(liveBot, cmd.command, { x: Number(cmd.x), y: Number(cmd.y), z: Number(cmd.z) });
+            break;
+          case 'use':
+            task = new BotActionTask(liveBot, cmd.command);
+            break;
+          default:
+            return res.status(400).json(_errResponse(`Unknown command: ${cmd.command}`));
+        }
+
+        if (task) {
+          this.botManager.assignTask(id, task);
+          fleetLog(`CMD_${cmd.command.toUpperCase()}`, id, profile.username, 'ok', { params: cmd });
+          res.json(_okResponse(`CMD_${cmd.command.toUpperCase()}`, id, profile.username, { params: cmd }));
+        }
+      } catch (err) {
+        fleetLog(`CMD_${cmd.command?.toUpperCase() || 'UNKNOWN'}`, id, profile.username, 'fail', { error: err.message });
+        res.status(500).json(_errResponse(`Command failed: ${err.message}`, 500));
+      }
     });
 
     // ── Bulk actions ────────────────────────────────────────────────────────

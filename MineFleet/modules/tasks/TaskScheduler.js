@@ -17,6 +17,7 @@
  */
 
 const Task = require('./Task');
+const WanderTask = require('./WanderTask');
 
 const TICK_INTERVAL_MS = 1000;
 
@@ -121,6 +122,18 @@ class TaskScheduler {
       } else if (tm.getQueue().length > 0) {
         // No active task but queue has work — start next immediately
         tm.advance();
+      } else {
+        // Queue is empty. 10% chance per second to wander slightly to prevent AFK kicks
+        if (Math.random() < 0.10) {
+          const liveBot = this.botManager.botEngine?.getBot(profile.id);
+          const mm = this.botManager.getMovementManager(profile.id);
+          
+          // Only wander if not already moving
+          if (liveBot && mm && !mm.isMoving()) {
+            const wanderTask = new WanderTask(liveBot, mm);
+            this.botManager.assignTask(profile.id, wanderTask);
+          }
+        }
       }
     }
   }
