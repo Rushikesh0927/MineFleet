@@ -476,6 +476,75 @@ class DashboardServer {
       res.json(_okResponse('STOP', id, profile.username, { intentional: true }));
     });
 
+    // ── Phase 2.5: World Map endpoints ──────────────────────────────────────
+    
+    // GET /api/map/positions — all bot and owner positions
+    app.get('/api/map/positions', (_req, res) => {
+      const positions = [];
+      const perms = this.configManager.getPermissions();
+      const ownerUsername = perms ? perms.owner : null;
+
+      let bestOwnerDimension = null;
+      let bestOwnerPos = null;
+
+      for (const profile of this.botManager.getProfiles()) {
+        const liveBot = this.botManager.botEngine?.getBot(profile.id);
+        if (!liveBot) continue;
+
+        const dimension = liveBot.game?.dimension || 'minecraft:overworld';
+        const botPos = liveBot.entity?.position;
+        
+        if (ownerUsername && liveBot.players && liveBot.players[ownerUsername]?.entity) {
+            bestOwnerPos = liveBot.players[ownerUsername].entity.position;
+            bestOwnerDimension = dimension;
+        }
+
+        let destination = null;
+        try {
+            const tm = this.botManager.getTaskManager(profile.id);
+            const active = tm.getActive();
+            if (active) {
+                const gotoMatch = active.name.match(/^goto\(([-.\d]+),([-.\d]+),([-.\d]+)\)$/);
+                if (gotoMatch) {
+                    destination = { x: parseFloat(gotoMatch[1]), z: parseFloat(gotoMatch[3]) };
+                }
+                const followMatch = active.name.match(/^follow\(([^)]+)\)$/);
+                if (followMatch) {
+                    const targetName = followMatch[1];
+                    if (liveBot.players[targetName]?.entity) {
+                        const tPos = liveBot.players[targetName].entity.position;
+                        destination = { x: tPos.x, z: tPos.z };
+                    }
+                }
+            }
+        } catch (e) {}
+
+        if (botPos) {
+          positions.push({
+            type: 'bot',
+            id: profile.id,
+            username: profile.username,
+            x: botPos.x,
+            z: botPos.z,
+            dimension,
+            destination
+          });
+        }
+      }
+
+      if (ownerUsername && bestOwnerPos) {
+          positions.push({
+              type: 'owner',
+              username: ownerUsername,
+              x: bestOwnerPos.x,
+              z: bestOwnerPos.z,
+              dimension: bestOwnerDimension
+          });
+      }
+
+      res.json(positions);
+    });
+
     // POST /api/fleet/bots/:id/restart — restart a bot
     app.post('/api/fleet/bots/:id/restart', (req, res) => {
       const id      = req.params.id;

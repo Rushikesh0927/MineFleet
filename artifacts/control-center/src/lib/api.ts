@@ -206,6 +206,24 @@ export function useConsoleLogs() {
   return { data: logs };
 }
 
+export interface MapPosition {
+  type: 'bot' | 'owner';
+  id?: string;
+  username: string;
+  x: number;
+  z: number;
+  dimension: string;
+  destination?: { x: number; z: number } | null;
+}
+
+export function useMapPositions() {
+  return useQuery<MapPosition[]>({
+    queryKey: ["map-positions"],
+    queryFn: () => apiFetch("/api/map/positions"),
+    refetchInterval: POLL,
+  });
+}
+
 export function useSystem() {
   return useQuery<SystemInfo>({
     queryKey: ["system"],

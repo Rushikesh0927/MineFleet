@@ -10,6 +10,7 @@ import Tasks from "@/pages/Tasks";
 import Plugins from "@/pages/Plugins";
 import Logs from "@/pages/Logs";
 import Settings from "@/pages/Settings";
+import WorldMap from "@/pages/WorldMap";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -31,6 +32,7 @@ function Router() {
         <Route path="/tasks" component={Tasks} />
         <Route path="/plugins" component={Plugins} />
         <Route path="/logs" component={Logs} />
+        <Route path="/map" component={WorldMap} />
         <Route path="/settings" component={Settings} />
         <Route component={NotFound} />
       </Switch>
