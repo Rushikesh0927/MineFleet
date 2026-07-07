@@ -79,19 +79,24 @@ create_cloud_init() {
     info "Creating cloud-init config..."
     mkdir -p /tmp/cidata
 
-    cat > /tmp/cidata/user-data <<'EOF'
+    # Generate a fresh SSH key pair for VM access
+    rm -f /tmp/vm_key /tmp/vm_key.pub
+    ssh-keygen -t ed25519 -f /tmp/vm_key -N "" -q
+    VM_PUBKEY=$(cat /tmp/vm_key.pub)
+    log "SSH key pair generated."
+
+    cat > /tmp/cidata/user-data <<EOF
 #cloud-config
-users:
-  - name: root
-    lock_passwd: false
-    passwd: "$6$rounds=4096$abc$WPLHkqKDWL3lSITe9AcGDlCkd1kzIcSk2I7SQqGP14sYGdBjFjJf2lBWJVo7mGqcQ3a0VLR9IJGCiKqnBdNp0/"
+ssh_authorized_keys:
+  - $VM_PUBKEY
 
-chpasswd:
-  expire: false
-
-ssh_pwauth: true
+disable_root: false
 
 runcmd:
+  - mkdir -p /root/.ssh
+  - echo "$VM_PUBKEY" >> /root/.ssh/authorized_keys
+  - chmod 700 /root/.ssh
+  - chmod 600 /root/.ssh/authorized_keys
   - apt-get update -qq
   - apt-get install -y -qq curl git
   - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -106,15 +111,13 @@ EOF
 
     echo "instance-id: minefleet-vm" > /tmp/cidata/meta-data
 
-    if command -v cloud-localds >/dev/null 2>&1; then
-        cloud-localds /tmp/seed.iso /tmp/cidata/user-data /tmp/cidata/meta-data
-    elif command -v genisoimage >/dev/null 2>&1; then
-        genisoimage -output /tmp/seed.iso -volid cidata -joliet -rock /tmp/cidata/
+    if command -v genisoimage >/dev/null 2>&1; then
+        genisoimage -output /tmp/seed.iso -volid cidata -joliet -rock /tmp/cidata/ 2>/dev/null
     elif command -v mkisofs >/dev/null 2>&1; then
-        mkisofs -output /tmp/seed.iso -volid cidata -joliet -rock /tmp/cidata/
+        mkisofs -output /tmp/seed.iso -volid cidata -joliet -rock /tmp/cidata/ 2>/dev/null
     else
-        apt-get install -y -qq cloud-image-utils 2>/dev/null
-        cloud-localds /tmp/seed.iso /tmp/cidata/user-data /tmp/cidata/meta-data
+        apt-get install -y -qq genisoimage 2>/dev/null
+        genisoimage -output /tmp/seed.iso -volid cidata -joliet -rock /tmp/cidata/ 2>/dev/null
     fi
     log "Cloud-init ISO created."
 }
@@ -154,22 +157,24 @@ boot_vm() {
 # Step 5 — Wait for VM to finish cloud-init
 # --------------------------------------------------------------------------
 wait_for_vm() {
-    info "Waiting for VM to boot and setup (2-4 minutes)..."
+    info "Waiting for VM to boot and setup (5-8 minutes first time)..."
     local attempts=0
-    while [ $attempts -lt 72 ]; do
-        result=$(sshpass -p "root" ssh -o StrictHostKeyChecking=no \
+    while [ $attempts -lt 120 ]; do
+        result=$(ssh -o StrictHostKeyChecking=no \
                -o ConnectTimeout=3 \
-               root@localhost -p "$VM_SSH_PORT" \
+               -o BatchMode=yes \
+               -i /tmp/vm_key \
+               -p 2222 root@localhost \
                "test -f /tmp/cloud_init_done && echo OK" 2>/dev/null)
         if echo "$result" | grep -q "OK"; then
             log "VM is ready!"
             return 0
         fi
-        echo -ne "\r${YELLOW}[!]${NC} Still booting... (${attempts}/72)"
+        echo -ne "\r${YELLOW}[!]${NC} Still booting... (${attempts}/120)"
         sleep 5
         attempts=$((attempts + 1))
     done
-    error "VM did not become ready in time. Check: tail -f /tmp/qemu.log"
+    error "VM did not become ready in time. Check: tail -f /tmp/vm_serial.log"
 }
 
 # --------------------------------------------------------------------------
@@ -178,32 +183,28 @@ wait_for_vm() {
 start_minefleet() {
     info "Starting MineFleet bots inside VM..."
 
-    local SSHOPTS="-o StrictHostKeyChecking=no -p $VM_SSH_PORT"
+    local SSHOPTS="-o StrictHostKeyChecking=no -i /tmp/vm_key -p $VM_SSH_PORT"
+    local SSHCMD="ssh $SSHOPTS root@localhost"
 
-    # Install sshpass if needed
-    command -v sshpass >/dev/null 2>&1 || apt-get install -y -qq sshpass 2>/dev/null
-
-    sshpass -p "root" ssh $SSHOPTS root@localhost \
-        "cd /opt/MineFleet/MineFleet && pm2 start index.js --name minefleet && pm2 save"
+    $SSHCMD "cd /opt/MineFleet/MineFleet && npm install --silent && pm2 start index.js --name minefleet && pm2 save"
     log "MineFleet started via pm2!"
 
-    info "Starting bore tunnel (outbound via HTTPS port 443 — bypasses Daytona firewall)..."
-    sshpass -p "root" ssh $SSHOPTS root@localhost \
-        "nohup bore local 0 --to bore.pub &>/tmp/bore.log & sleep 2 && cat /tmp/bore.log | head -5"
+    info "Starting bore tunnel (outbound via port 443 — bypasses Daytona firewall)..."
+    $SSHCMD "nohup bore local 0 --to bore.pub &>/tmp/bore.log & sleep 2 && cat /tmp/bore.log"
 
     echo ""
     echo -e "${GREEN}============================================================${NC}"
     echo -e "${WHITE}  ✅  MineFleet is RUNNING inside the VM!                   ${NC}"
     echo -e "${GREEN}============================================================${NC}"
     echo ""
-    echo -e "${CYAN}  View bot logs:${NC}"
-    echo -e "  sshpass -p root ssh $SSHOPTS root@localhost 'pm2 logs minefleet --lines 50'"
-    echo ""
     echo -e "${CYAN}  SSH into VM:${NC}"
-    echo -e "  sshpass -p root ssh $SSHOPTS root@localhost"
+    echo -e "  ssh $SSHOPTS root@localhost"
+    echo ""
+    echo -e "${CYAN}  View bot logs:${NC}"
+    echo -e "  ssh $SSHOPTS root@localhost 'pm2 logs minefleet --lines 50'"
     echo ""
     echo -e "${CYAN}  Stop bots:${NC}"
-    echo -e "  sshpass -p root ssh $SSHOPTS root@localhost 'pm2 stop minefleet'"
+    echo -e "  ssh $SSHOPTS root@localhost 'pm2 stop minefleet'"
     echo -e "${GREEN}============================================================${NC}"
 }
 
