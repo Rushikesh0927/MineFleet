@@ -30,7 +30,6 @@ const BotManager               = require('./BotManager');
 const BotEngine                = require('../modules/bot/BotEngine');
 const TaskScheduler            = require('../modules/tasks/TaskScheduler');
 const DashboardServer          = require('../dashboard/DashboardServer');
-const KeepAlive                = require('./KeepAlive');
 const registerMovementCommands = require('../commands/MovementCommands');
 
 class Application {
@@ -50,7 +49,6 @@ class Application {
       this.configManager,
       this.eventManager
     );
-    this.keepAlive = new KeepAlive(this.botManager, this.botEngine);
   }
 
   /**
@@ -73,10 +71,6 @@ class Application {
     );
     registerMovementCommands(this.commandManager, this.botManager);
     this.dashboardServer.initialize();
-
-    // Start keep-alive AFTER the HTTP server is listening
-    const port = parseInt(process.env.DASHBOARD_PORT, 10) || 3000;
-    this.keepAlive.start(port);
   }
 
   /**
@@ -84,7 +78,6 @@ class Application {
    */
   shutdown() {
     console.log('MineFleet shutting down...');
-    this.keepAlive.stop();
     this.dashboardServer.shutdown();
     this.taskScheduler.stop();
     this.pluginManager.shutdown();

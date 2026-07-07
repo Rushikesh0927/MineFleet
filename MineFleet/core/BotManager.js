@@ -91,10 +91,12 @@ class BotManager {
     this.loadProfiles(configManager);
     this._subscribeToEvents(eventManager);
 
-    // Start every profile that is marked enabled
+    // Start every profile that is marked enabled, staggered by 5 seconds
+    let index = 0;
     for (const profile of this.getProfiles()) {
       if (profile.enabled) {
-        this._scheduleInitialStart(profile.id);
+        this._scheduleInitialStart(profile.id, index);
+        index++;
       }
     }
 
@@ -790,23 +792,24 @@ class BotManager {
   }
 
   /**
-   * Schedules the first startup for a bot using a randomized stagger.
+   * Schedules the first startup for a bot using a sequential 5-second stagger.
    *
    * @param {string} id
+   * @param {number} index
    */
-  _scheduleInitialStart(id) {
+  _scheduleInitialStart(id, index = 0) {
     const profile = this.profiles[id];
     if (!profile || this.startupTimers[id]) return;
 
-    const delayMs = Math.floor(Math.random() * (30_000 - 2_000 + 1)) + 2_000;
+    // Start the first bot immediately, then 5s between each
+    const delayMs = index * 5000;
+    
+    console.log(`[BotManager] Queuing ${profile.username} to start in ${delayMs / 1000}s...`);
+
     this.startupTimers[id] = setTimeout(() => {
       delete this.startupTimers[id];
       this.startBot(id);
     }, delayMs);
-
-    if (DEBUG) {
-      console.log(`[BotManager][DEBUG] ${new Date().toISOString()} | ${profile.username} | initial startup delay=${delayMs}ms`);
-    }
   }
 
   /**

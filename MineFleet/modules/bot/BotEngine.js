@@ -22,6 +22,7 @@
 const mineflayer      = require('mineflayer');
 const MovementManager = require('../movement/MovementManager');
 const ConsoleBuffer   = require('../../core/ConsoleBuffer');
+const AIAgent         = require('../ai/AIAgent');
 
 // ─── Debug flag (item 14) ────────────────────────────────────────────────────
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
@@ -110,6 +111,9 @@ class BotEngine {
    * Stores manager references and starts background diagnostic monitors.
    */
   initialize(eventManager, commandManager) {
+    this.taskManagers     = {}; // id -> TaskManager
+    this.aiAgents         = {}; // id -> AIAgent
+
     this.eventManager   = eventManager;
     this.commandManager = commandManager;
 
@@ -188,10 +192,19 @@ class BotEngine {
     // ── Item 1: lifecycle — CREATING ──────────────────────────────────────
     const prevState = this._states[id] || 'NONE';
     this._setState(id, 'CREATING', prevState);
-    console.log(`[BotEngine] Creating Bot: ${name}`);
+    
+    console.log(`[BotEngine] ---------------------------------------------`);
+    console.log(`[BotEngine] 🚀 ${name} attempting to connect...`);
+    console.log(`[BotEngine] 🌐 Target: ${profile.host}:${profile.port} | Version: ${profile.version}`);
+    console.log(`[BotEngine] ---------------------------------------------`);
+    
     ConsoleBuffer.pushEvent(name, 'Reconnect', 'Creating bot instance', 'info');
 
-    // ── Item 7: start timing ──────────────────────────────────────────────
+    if (profile.aiEnabled) {
+      this.aiAgents[id] = new AIAgent(this, id, profile.username);
+    }
+
+    // ── Pre-login listeners (item 5) ──────────────────────────────────────────────
     this._timings[id] = { createBotAt: Date.now() };
 
     // ── Platform event: connecting ────────────────────────────────────────
@@ -240,6 +253,7 @@ class BotEngine {
 
     // ── Item 1 + 7: spawn ─────────────────────────────────────────────────
     bot.on('spawn', () => {
+      console.log(`[BotEngine] ✅ ${name} SUCCESSFULLY JOINED ${profile.host}:${profile.port}!`);
       const prev = this._states[id] || 'LOGIN';
       this._setState(id, 'SPAWN', prev);
       this._timings[id].spawnAt = Date.now();
@@ -408,6 +422,11 @@ class BotEngine {
       if (username === bot.username) return;
       if (message.startsWith('!')) {
         this.commandManager.execute(username, message, bot);
+      } else if (this.aiAgents[id]) {
+        // AI intercept: trigger if the bot's username is mentioned natively
+        if (message.toLowerCase().includes(bot.username.toLowerCase())) {
+          this.aiAgents[id].handleMessage(username, message, bot);
+        }
       }
     });
 
