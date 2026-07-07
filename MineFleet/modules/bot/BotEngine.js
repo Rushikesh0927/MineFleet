@@ -22,7 +22,13 @@
 const mineflayer      = require('mineflayer');
 const MovementManager = require('../movement/MovementManager');
 const ConsoleBuffer   = require('../../core/ConsoleBuffer');
-const AIAgent         = require('../ai/AIAgent');
+
+let AIAgent = null;
+try {
+  AIAgent = require('../ai/AIAgent');
+} catch (e) {
+  // AI module not present yet, ignore
+}
 
 // ─── Debug flag (item 14) ────────────────────────────────────────────────────
 const DEBUG = process.env.DEBUG_RECONNECT === 'true';
@@ -200,8 +206,10 @@ class BotEngine {
     
     ConsoleBuffer.pushEvent(name, 'Reconnect', 'Creating bot instance', 'info');
 
-    if (profile.aiEnabled) {
+    if (profile.aiEnabled && AIAgent) {
       this.aiAgents[id] = new AIAgent(this, id, profile.username);
+    } else if (profile.aiEnabled) {
+      console.log(`[BotEngine] ⚠️ AI enabled for ${name} but AIAgent module is missing.`);
     }
 
     // ── Pre-login listeners (item 5) ──────────────────────────────────────────────
