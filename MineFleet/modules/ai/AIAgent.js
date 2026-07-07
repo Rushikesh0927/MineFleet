@@ -66,6 +66,7 @@ class AIAgent {
       { type: 'function', function: { name: 'goto', description: 'Walk to x y z coordinates', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'follow', description: 'Follow a player by name', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
       { type: 'function', function: { name: 'jump', description: 'Make the bot jump', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'explore', description: 'Wander around randomly to explore the area and find new blocks or biomes', parameters: { type: 'object', properties: {} } } },
       { type: 'function', function: { name: 'mine', description: 'Mine the block at x y z. You MUST be standing right next to it (within 4 blocks)! If you are far, use goto first.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'attack', description: 'Attack entity by name or "hostile" for nearest hostile', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
       { type: 'function', function: { name: 'craft', description: 'Craft an item by name (e.g. "wooden_pickaxe", "crafting_table")', parameters: { type: 'object', properties: { itemName: { type: 'string' } }, required: ['itemName'] } } },
@@ -134,16 +135,21 @@ class AIAgent {
 
     const held = bot.heldItem ? `${bot.heldItem.name}x${bot.heldItem.count}` : 'nothing';
 
-    // Scan nearby blocks
+    // Scan nearby blocks for interesting things (skip common ground blocks)
     let nearbyBlocks = [];
     if (pos) {
-      for (let dx = -3; dx <= 3; dx += 2) {
-        for (let dz = -3; dz <= 3; dz += 2) {
-          for (let dy = -1; dy <= 2; dy++) {
+      const junk = ['air', 'cave_air', 'dirt', 'grass_block', 'stone', 'water', 'lava', 'bedrock', 'sand', 'gravel', 'tall_grass', 'grass', 'poppy', 'dandelion'];
+      for (let dx = -6; dx <= 6; dx += 1) {
+        for (let dz = -6; dz <= 6; dz += 1) {
+          for (let dy = -2; dy <= 5; dy++) {
             try {
               const block = bot.blockAt(pos.offset(dx, dy, dz));
-              if (block && block.name !== 'air' && !nearbyBlocks.includes(block.name)) {
-                nearbyBlocks.push(block.name);
+              if (block && !junk.includes(block.name)) {
+                const bname = `${block.name}@${block.position.x},${block.position.y},${block.position.z}`;
+                // Only push unique blocks, max 20 to save prompt space
+                if (!nearbyBlocks.includes(bname) && nearbyBlocks.length < 20) {
+                  nearbyBlocks.push(bname);
+                }
               }
             } catch (_) {}
           }
@@ -171,7 +177,7 @@ class AIAgent {
       invSummary,
       invRaw: inv,
       nearbyPlayers: nearbyPlayers.length ? nearbyPlayers.join(', ') : 'none',
-      nearbyBlocks: nearbyBlocks.slice(0, 8).join(', ') || 'air',
+      nearbyBlocks: nearbyBlocks.length ? nearbyBlocks.join(' | ') : 'none',
       nearbyMobs: nearbyMobs.length ? nearbyMobs.join(', ') : 'none',
       timeOfDay: bot.time?.timeOfDay ?? 0,
       isDay: (bot.time?.timeOfDay ?? 0) < 13000,
@@ -212,9 +218,11 @@ ${this.memory.getContextForPrompt()}
 RULES:
 - Keep chat under 200 chars (Minecraft limit)
 - Talk naturally like a real player
-- ONLY use tools if you need to take a physical action (move, craft, attack, jump, etc.) that the user explicitly asked for.
+- ONLY use tools if you need to take a physical action (move, explore, craft, attack, jump, etc.) that the user explicitly asked for, OR if you are in autonomous mode and need to achieve your goal.
+- If you don't see the block you need nearby, use the 'explore' tool to walk around and find it!
+- You MUST provide conversational text in your response, even if you call a tool!
+- If the player asks where you are, read your Position from the GAME STATE and tell them your X, Y, Z coordinates.
 - Do NOT hallucinate tool calls just because you can!
-- If the player is just chatting or asking a question, do NOT use any tools! Just reply with text.
 - Think step by step — what's the best next action?
 - Learn from failures — don't repeat mistakes`;
   }
@@ -336,7 +344,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
       // RAG: retrieve knowledge relevant to the player's question
       const ragKnowledge = this.rag.retrieve(message, 2);
 
-      const stateContext = `[Pos ${state.posStr} | HP ${state.health}/20 | Food ${state.food}/20 | Holding: ${state.heldItem} | Inv: ${state.invSummary} | Near: ${state.nearbyPlayers}]`;
+      const stateContext = `[Pos ${state.posStr} | HP ${state.health}/20 | Food ${state.food}/20 | Holding: ${state.heldItem} | NearBlocks: ${state.nearbyBlocks}]`;
 
       this.conversationHistory.push({ role: 'user', content: `${sender}: ${message}\n${stateContext}` });
       if (this.conversationHistory.length > this.MAX_HISTORY) {
@@ -399,6 +407,11 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
       if (fn === 'jump') {
         bot.setControlState('jump', true);
         setTimeout(() => bot.setControlState('jump', false), 500);
+        return true;
+      }
+      if (fn === 'explore') {
+        const WanderTask = require('../tasks/WanderTask');
+        if (mm) this.botManager.assignTask(id, new WanderTask(bot, mm, 15)); // wander 15 blocks
         return true;
       }
       if (fn === 'goto') {
