@@ -127,18 +127,25 @@ boot_vm() {
     pkill -f qemu-system-x86_64 2>/dev/null || true
     sleep 1
 
-    qemu-system-x86_64 \
+    nohup qemu-system-x86_64 \
         -m "$QEMU_RAM" \
         -smp "$QEMU_CPU" \
         -drive file="$DISK_IMG",format=qcow2,if=virtio \
         -drive file=/tmp/seed.iso,format=raw,if=virtio \
         -net nic,model=virtio \
         -net user,hostfwd=tcp::"$VM_SSH_PORT"-:22 \
-        -nographic \
+        -display none \
+        -serial file:/tmp/vm_serial.log \
         -no-reboot \
-        -daemonize \
-        -pidfile /tmp/qemu.pid \
-        2>/tmp/qemu.log || error "Failed to start QEMU. Check /tmp/qemu.log"
+        > /tmp/qemu.log 2>&1 &
+
+    echo $! > /tmp/qemu.pid
+    sleep 2
+
+    # Verify it started
+    if ! kill -0 $(cat /tmp/qemu.pid) 2>/dev/null; then
+        error "Failed to start QEMU. Check /tmp/qemu.log"
+    fi
 
     log "QEMU VM started (PID: $(cat /tmp/qemu.pid))."
 }
