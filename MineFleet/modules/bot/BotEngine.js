@@ -230,6 +230,7 @@ class BotEngine {
       host:     profile.host,
       port:     profile.port,
       version:  profile.version,
+      auth:     'offline', // Critical for Aternos cracked servers to prevent hanging
     });
 
     bot._minefleetId = id;
