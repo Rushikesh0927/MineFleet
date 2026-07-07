@@ -14,7 +14,7 @@ const { OpenAI } = require('openai');
 const KnowledgeRAG = require('./KnowledgeRAG');
 const BotMemory = require('./BotMemory');
 
-const AUTO_LOOP_INTERVAL_MS = 25_000; // 25 seconds between autonomous decisions
+const AUTO_LOOP_INTERVAL_MS = 10_000; // 10 seconds between autonomous decisions (much faster)
 
 // Survival goal progression — the bot follows this like a real player
 const GOAL_TREE = [
@@ -411,7 +411,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
       }
       if (fn === 'explore') {
         const WanderTask = require('../tasks/WanderTask');
-        if (mm) this.botManager.assignTask(id, new WanderTask(bot, mm, 15)); // wander 15 blocks
+        if (mm) this.botManager.assignTask(id, new WanderTask(bot, mm, 40)); // wander 40 blocks
         return true;
       }
       if (fn === 'goto') {
