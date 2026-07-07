@@ -29,10 +29,10 @@ class AIAgent {
       apiKey: process.env.NVIDIA_API_KEY || '',
     });
 
-    // Models to try in order — Llama first since glm is degraded
+    // Models to try in order — 8B first (proven working from VPS in 0.7s)
     this.models = [
-      'meta/llama-3.3-70b-instruct',
-      'meta/llama-3.1-8b-instruct',
+      'meta/llama-3.1-8b-instruct',  // Fast, reliable, works with tools
+      'meta/llama-3.3-70b-instruct', // Backup (sometimes times out from VPS)
     ];
 
     // Tools the AI can call to control the bot
