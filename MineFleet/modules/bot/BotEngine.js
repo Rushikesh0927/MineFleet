@@ -206,10 +206,10 @@ class BotEngine {
     
     ConsoleBuffer.pushEvent(name, 'Reconnect', 'Creating bot instance', 'info');
 
-    if (id === 'bot-5' && AIAgent) {
+    if (profile.username === 'MineFleetBot5' && AIAgent) {
       this.aiAgents[id] = new AIAgent(this, id, profile.username);
       console.log(`[BotEngine] 🧠 AI module initialized exclusively for ${name}`);
-    } else if (id === 'bot-5') {
+    } else if (profile.username === 'MineFleetBot5') {
       console.log(`[BotEngine] ⚠️ AI enabled for ${name} but AIAgent module is missing.`);
     }
 
