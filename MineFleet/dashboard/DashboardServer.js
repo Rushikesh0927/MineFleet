@@ -814,6 +814,19 @@ class DashboardServer {
       res.json(_okResponse('RESTART', id, profile.username));
     });
 
+    // POST /api/fleet/bots/:id/stop-movement — cancel current task/movement
+    app.post('/api/fleet/bots/:id/stop-movement', (req, res) => {
+      const id      = req.params.id;
+      const profile = this.botManager.getProfile(id);
+      if (!profile) {
+        return res.status(404).json(_errResponse(`Bot '${id}' not found`, 404));
+      }
+
+      fleetLog('STOP_MOVEMENT', id, profile.username, 'ok');
+      this.botManager.cancelTask(id);
+      res.json(_okResponse('STOP_MOVEMENT', id, profile.username));
+    });
+
     // PATCH /api/fleet/bots/:id/autoreconnect — enable/disable autoReconnect
     // Body: { enabled: true|false }
     app.patch('/api/fleet/bots/:id/autoreconnect', (req, res) => {

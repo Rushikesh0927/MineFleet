@@ -3,7 +3,7 @@ import { useFleetBot, useTasks } from "@/lib/api";
 import { useServerContext } from "@/contexts/ServerContext";
 import {
   ArrowLeft, Bot, Heart, Utensils, Wifi, MapPin,
-  AlertTriangle, Play, Square, RotateCw, Trash2, Loader2, ArrowRight
+  AlertTriangle, Play, Square, RotateCw, Trash2, Loader2, ArrowRight, Ban
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CommandPanel } from "@/components/CommandPanel";
@@ -139,10 +139,16 @@ export default function BotDetail() {
             </Button>
           )}
           {bot.status === 'ONLINE' && (
-            <Button size="sm" variant="outline" onClick={() => handleFleetAction('stop')} disabled={loadingAction === 'stop'}>
-              {loadingAction === 'stop' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Square className="w-4 h-4 mr-1.5" />}
-              Stop
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => handleFleetAction('stop')} disabled={loadingAction === 'stop'}>
+                {loadingAction === 'stop' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Square className="w-4 h-4 mr-1.5" />}
+                Stop
+              </Button>
+              <Button size="sm" variant="destructive" onClick={() => handleFleetAction('stop-movement')} disabled={loadingAction === 'stop-movement'}>
+                {loadingAction === 'stop-movement' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Ban className="w-4 h-4 mr-1.5" />}
+                Stop Moving
+              </Button>
+            </>
           )}
           <Button size="sm" variant="outline" onClick={() => handleFleetAction('restart')} disabled={loadingAction === 'restart'}>
             {loadingAction === 'restart' ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <RotateCw className="w-4 h-4 mr-1.5" />}
@@ -167,7 +173,7 @@ export default function BotDetail() {
         <div className="bg-card border border-card-border rounded-lg p-4">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Connection</h3>
           <div>
-            <InfoRow label="Server"   value={bot.server     ?? "—"} />
+            <InfoRow label="Server"   value={bot.server || (bot as any).host || "—"} />
             <InfoRow label="Ping"     value={bot.ping !== undefined ? `${bot.ping}ms` : "—"} />
             <InfoRow label="Uptime"   value={bot.uptime !== undefined ? `${bot.uptime}s` : "—"} />
             <InfoRow label="Game Mode" value={bot.gameMode  ?? "—"} />
