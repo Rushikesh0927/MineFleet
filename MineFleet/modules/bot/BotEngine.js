@@ -461,6 +461,17 @@ class BotEngine {
   }
 
   /**
+   * Forwards task assignment to the BotManager.
+   */
+  assignTask(id, task) {
+    if (this.botManager) {
+      this.botManager.assignTask(id, task);
+    } else {
+      console.error(`[BotEngine] Cannot assign task to ${id} — botManager not linked.`);
+    }
+  }
+
+  /**
    * Gracefully shuts down all active bots and cancels pending reconnect timers.
    */
   shutdown() {

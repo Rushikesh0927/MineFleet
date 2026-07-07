@@ -62,6 +62,7 @@ class Application {
     this.commandManager.initialize(this.configManager, this.permissionManager);
     this.botEngine.initialize(this.eventManager, this.commandManager);
     this.botManager.initialize(this.configManager, this.botEngine, this.eventManager);
+    this.botEngine.botManager = this.botManager;
     this.taskScheduler.initialize(this.botManager);
     this.pluginManager.initialize(
       this.eventManager,
