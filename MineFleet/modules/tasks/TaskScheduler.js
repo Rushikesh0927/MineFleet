@@ -128,8 +128,8 @@ class TaskScheduler {
           const liveBot = this.botManager.botEngine?.getBot(profile.id);
           const mm = this.botManager.getMovementManager(profile.id);
           
-          // Only wander if not already moving
-          if (liveBot && mm && !mm.isMoving()) {
+          // Only wander if not already moving, and NOT an AI bot (MineFleetBot5 is fully AI-controlled)
+          if (liveBot && mm && !mm.isMoving() && profile.username !== 'MineFleetBot5') {
             const wanderTask = new WanderTask(liveBot, mm);
             this.botManager.assignTask(profile.id, wanderTask);
           }

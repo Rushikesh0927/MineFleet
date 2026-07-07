@@ -343,7 +343,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
       const msg = await this._callLLM([
         { role: 'system', content: this._buildSystemPrompt('chat', sender, ragKnowledge, state) },
         ...this.conversationHistory.slice(-8)
-      ]);
+      ], false); // Disable tool calls in chat mode so it doesn't hallucinate actions
 
       if (msg.content) {
         this.conversationHistory.push({ role: 'assistant', content: msg.content });
