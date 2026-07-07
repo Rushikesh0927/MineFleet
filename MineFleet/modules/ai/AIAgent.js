@@ -57,7 +57,7 @@ class AIAgent {
 
     // Model fallback chain — 70B first (with compact RAG prompt it should work now)
     this.models = [
-      'meta/llama-3.3-70b-instruct',
+      'meta/llama-3.1-70b-instruct',
       'meta/llama-3.1-8b-instruct',
     ];
 
@@ -65,7 +65,7 @@ class AIAgent {
     this.tools = [
       { type: 'function', function: { name: 'goto', description: 'Walk to x y z coordinates', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'follow', description: 'Follow a player by name', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
-      { type: 'function', function: { name: 'mine', description: 'Mine the block at x y z', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
+      { type: 'function', function: { name: 'mine', description: 'Mine the block at x y z. You MUST be standing right next to it (within 4 blocks)! If you are far, use goto first.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'attack', description: 'Attack entity by name or "hostile" for nearest hostile', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
       { type: 'function', function: { name: 'craft', description: 'Craft an item by name (e.g. "wooden_pickaxe", "crafting_table")', parameters: { type: 'object', properties: { itemName: { type: 'string' } }, required: ['itemName'] } } },
       { type: 'function', function: { name: 'stop', description: 'Stop current action', parameters: { type: 'object', properties: {} } } },
