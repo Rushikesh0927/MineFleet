@@ -6,6 +6,7 @@
  */
 
 const Task = require('./Task');
+const { Vec3 } = require('vec3');
 
 class BotActionTask extends Task {
   /**
@@ -33,7 +34,7 @@ class BotActionTask extends Task {
         // We actually need the absolute block. Let's just use blockAt directly with absolute coords if provided.
         // Wait, mineflayer blockAt takes a vec3. We can just use mineflayer's vec3 or an object with x,y,z.
         const targetBlock = (x !== undefined && y !== undefined && z !== undefined) 
-                            ? this.bot.blockAt({ x, y, z }) 
+                            ? this.bot.blockAt(new Vec3(x, y, z)) 
                             : null;
         
         if (!targetBlock) {
@@ -56,7 +57,7 @@ class BotActionTask extends Task {
         // Place block requires a reference block and a face vector. 
         // For simplicity in a basic command, we'll try to place it ON the block at x,y,z on its top face (0,1,0).
         const referenceBlock = (x !== undefined && y !== undefined && z !== undefined) 
-                            ? this.bot.blockAt({ x, y, z }) 
+                            ? this.bot.blockAt(new Vec3(x, y, z)) 
                             : null;
 
         if (!referenceBlock) {
