@@ -35,6 +35,7 @@
  */
 
 const express    = require('express');
+const path       = require('path');
 const { WebSocketServer } = require('ws');
 const FollowTask = require('../modules/tasks/FollowTask');
 const GotoTask   = require('../modules/tasks/GotoTask');
@@ -414,6 +415,7 @@ class DashboardServer {
     const app = this.app;
 
     app.use(express.json());
+    app.use(express.static(path.join(__dirname, 'public')));
 
     if (DEBUG) {
       app.use((req, res, next) => {
