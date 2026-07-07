@@ -284,6 +284,7 @@ Holding: ${state.heldItem} | Inventory: ${state.invSummary}
 Nearby blocks: ${state.nearbyBlocks}
 Nearby mobs: ${state.nearbyMobs}
 Nearby players: ${state.nearbyPlayers}
+${this.conversationHistory.length ? `\nRECENT CHAT HISTORY (Use player feedback to guide your actions!):\n${this.conversationHistory.slice(-4).map(m => (m.role === 'user' ? 'PLAYER' : 'YOU') + ': ' + m.content).join('\n')}` : ''}
 
 YOUR GOAL: ${currentGoal}
 What is the best SINGLE next action? Use a tool. Explain briefly what you're doing.`;
@@ -371,11 +372,11 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
             this.memory.addExperience(`${fn} by ${sender}`, JSON.stringify(args), true);
           }
         }
-        bot.chat((msg.content || `On it, ${sender}!`).slice(0, 200));
+        if (msg.content && msg.content.trim().length > 0) {
+          bot.chat(msg.content.slice(0, 200));
+        }
       } else if (msg.content) {
         bot.chat(msg.content.slice(0, 200));
-      } else {
-        bot.chat(`Hey ${sender}! What's up?`);
       }
 
       this.memory.data.chatResponses++;
