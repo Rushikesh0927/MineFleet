@@ -305,8 +305,10 @@ class BotEngine {
             );
           }
 
-          // Item 8: listener count audit after fully online
-          if (DEBUG) this._auditListeners(bot, name);
+          // Start autonomous self-learning loop for AI bots
+          if (this.aiAgents[id]) {
+            this.aiAgents[id].startAutonomousLoop(bot, this.taskManagers[id]);
+          }
         });
       });
     });
@@ -427,14 +429,23 @@ class BotEngine {
       }, delayMs);
     });
 
-    // ── Forward !-prefixed chat messages to CommandManager ────────────────
+    // ── Forward !-prefixed chat messages to CommandManager or AIAgent ────────────────
     bot.on('chat', (username, message) => {
       if (username === bot.username) return;
+
+      // Check if it is an AI command: !MineFleetBot5 <text>
+      const aiPrefix = `!${bot.username}`;
+      if (this.aiAgents[id] && message.toLowerCase().startsWith(aiPrefix.toLowerCase())) {
+        const userMsg = message.slice(aiPrefix.length).trim();
+        if (userMsg.length > 0) {
+          this.aiAgents[id].handleMessage(username, userMsg, bot);
+        }
+        return;
+      }
+
+      // Otherwise forward !commands to CommandManager
       if (message.startsWith('!')) {
         this.commandManager.execute(username, message, bot);
-      } else if (this.aiAgents[id]) {
-        // AI intercept: trigger for ALL messages if this bot has an AI agent (bot-5)
-        this.aiAgents[id].handleMessage(username, message, bot);
       }
     });
 

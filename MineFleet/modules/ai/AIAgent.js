@@ -1,16 +1,26 @@
 const { OpenAI } = require('openai');
 
+// How often the bot autonomously decides its next action (ms)
+const AUTO_LOOP_INTERVAL_MS = 45_000; // 45 seconds
+
 class AIAgent {
   constructor(botManager, botId, username) {
     this.botManager = botManager;
     this.botId = botId;
     this.username = username;
 
-    // Conversation history — bot "remembers" past messages (self-learning memory)
+    // Conversation memory (learning from interactions)
     this.conversationHistory = [];
-    this.MAX_HISTORY = 40; // keep last 40 exchanges in context
+    this.MAX_HISTORY = 60; // keep last 60 exchanges
 
-    // Initialize OpenAI client pointing to NVIDIA NIM API
+    // Autonomous gameplay experience log (self-learning)
+    this.experienceLog = [];
+    this.MAX_EXPERIENCE = 30; // keep last 30 autonomous actions + results
+
+    // Autonomous loop handle
+    this._autoLoopTimer = null;
+    this._isThinking = false; // prevent overlapping AI calls
+
     this.openai = new OpenAI({
       baseURL: 'https://integrate.api.nvidia.com/v1',
       apiKey: process.env.NVIDIA_API_KEY || '',
@@ -24,7 +34,7 @@ class AIAgent {
         type: 'function',
         function: {
           name: 'goto',
-          description: 'Moves the bot to specific x, y, z coordinates.',
+          description: 'Move the bot to specific x, y, z coordinates.',
           parameters: {
             type: 'object',
             properties: {
@@ -40,11 +50,11 @@ class AIAgent {
         type: 'function',
         function: {
           name: 'follow',
-          description: 'Follows a specific player.',
+          description: 'Follow a specific player.',
           parameters: {
             type: 'object',
             properties: {
-              target: { type: 'string', description: 'The name of the player to follow' }
+              target: { type: 'string', description: 'Player name to follow' }
             },
             required: ['target']
           }
@@ -54,7 +64,7 @@ class AIAgent {
         type: 'function',
         function: {
           name: 'mine',
-          description: 'Mines a block at specific coordinates.',
+          description: 'Mine a block at specific x, y, z coordinates.',
           parameters: {
             type: 'object',
             properties: {
@@ -70,7 +80,7 @@ class AIAgent {
         type: 'function',
         function: {
           name: 'stop',
-          description: 'Stops the current action (e.g. stops moving or following).',
+          description: 'Stop the current action.',
           parameters: { type: 'object', properties: {}, required: [] }
         }
       },
@@ -78,11 +88,11 @@ class AIAgent {
         type: 'function',
         function: {
           name: 'attack',
-          description: 'Attacks a specific target entity or type of entity (e.g. "hostile").',
+          description: 'Attack a specific entity or "hostile" to attack nearest hostile mob.',
           parameters: {
             type: 'object',
             properties: {
-              target: { type: 'string', description: 'The name of the entity or "hostile"' }
+              target: { type: 'string', description: 'Entity name or "hostile"' }
             },
             required: ['target']
           }
@@ -91,124 +101,282 @@ class AIAgent {
     ];
   }
 
+  // ─── Game state reader ─────────────────────────────────────────────────────
+
   /**
-   * Build the comprehensive Minecraft Java Edition system prompt.
+   * Read current live game state from the mineflayer bot.
+   * This is what gives the AI "eyes" into the Minecraft world.
    */
-  _buildSystemPrompt(sender) {
-    return `You are MineFleetBot5, an AI-powered Minecraft Java Edition bot and expert assistant with memory of past conversations.
-The player talking to you right now is: ${sender}.
-You are live on a Minecraft server and can hear all chat. You remember everything said to you and learn from each interaction.
+  _readGameState(bot) {
+    const pos = bot.entity?.position;
+    const inv = bot.inventory?.items() ?? [];
+
+    // Summarise inventory (top 10 items)
+    const invSummary = inv.slice(0, 10)
+      .map(i => `${i.name}x${i.count}`)
+      .join(', ') || 'empty';
+
+    // Nearby players (excluding self)
+    const nearbyPlayers = Object.values(bot.players || {})
+      .filter(p => p.username !== bot.username)
+      .map(p => p.username);
+
+    // Held item
+    const held = bot.heldItem ? `${bot.heldItem.name}x${bot.heldItem.count}` : 'nothing';
+
+    return {
+      posStr: pos ? `X:${Math.floor(pos.x)} Y:${Math.floor(pos.y)} Z:${Math.floor(pos.z)}` : 'unknown',
+      health: bot.health ?? '?',
+      food: bot.food ?? '?',
+      dimension: bot.game?.dimension ?? 'overworld',
+      heldItem: held,
+      invSummary,
+      nearbyPlayers: nearbyPlayers.length ? nearbyPlayers.join(', ') : 'none',
+    };
+  }
+
+  // ─── System prompt ─────────────────────────────────────────────────────────
+
+  _buildSystemPrompt(context = 'chat', senderName = null) {
+    const baseIdentity = `You are MineFleetBot5, an autonomous AI Minecraft Java Edition bot with the ability to learn, remember, and play the game by yourself.
+${context === 'autonomous'
+  ? 'You are currently in AUTONOMOUS MODE — no player has given you an order. You must decide what to do next on your own to survive and thrive in Minecraft.'
+  : `A player named ${senderName} is talking to you right now.`}
+
+You remember everything from past actions and conversations. You learn by doing — you try actions, observe what happens, and use that knowledge for future decisions.
 
 === COMPLETE MINECRAFT JAVA EDITION KNOWLEDGE ===
 
-CRAFTING SYSTEM:
-- 2x2 inventory grid: basic recipes (sticks, planks, crafting table)
-- 3x3 Crafting Table grid: advanced recipes
-- Key recipes:
-  * Crafting Table = 4 Wooden Planks (any type)
-  * Sticks = 2 Planks stacked vertically
-  * Wooden Sword/Pick/Axe/Shovel/Hoe = planks + sticks (T-shape)
-  * Stone/Iron/Gold/Diamond/Netherite tools = same shape with those materials
-  * Furnace = 8 Cobblestones (hollow square)
-  * Chest = 8 Planks (hollow square)
-  * Bed = 3 Wool (top) + 3 Planks (bottom), color matches wool
-  * Torch = 1 Coal/Charcoal + 1 Stick = 4 Torches
-  * Iron Armor = Iron Ingots in helmet/chestplate/leggings/boots shape
-  * Bow = 3 Sticks + 3 String
-  * Arrows = 1 Flint + 1 Stick + 1 Feather = 4 Arrows
-  * Bookshelf = 3 Books + 6 Planks
-  * Enchanting Table = 1 Book + 2 Diamonds + 4 Obsidian
-  * Piston = 3 Planks + 4 Cobblestone + 1 Iron Ingot + 1 Redstone
-  * Netherite Upgrade: combine Diamond item + Netherite Ingot in Smithing Table
+SURVIVAL PRIORITIES (in order):
+1. Stay alive: health > 10 (5 hearts), food > 6
+2. Gather basic resources: wood → planks → crafting table → sticks → tools
+3. Get shelter before night (Creepers, Zombies, Skeletons spawn in dark)
+4. Progress: stone tools → iron tools → diamond tools → netherite
+5. Explore: caves for ores, structures for loot, Nether for blaze rods, End for Ender Dragon
 
-SMELTING:
-- Furnace needs fuel (Coal, Charcoal, Wood, Lava Bucket) and input item
-- Iron Ore → Iron Ingot, Gold Ore → Gold Ingot, Sand → Glass, Raw Chicken/Beef/Pork → Cooked food
-- Blast Furnace: 2x faster for ores/ingots
-- Smoker: 2x faster for food
+CRAFTING RECIPES (key ones):
+- Crafting Table: 4 any Wooden Planks
+- Sticks: 2 Planks stacked vertically = 4 sticks
+- Wooden Pickaxe: 3 Planks on top row + 2 Sticks middle column
+- Wooden Sword/Axe/Shovel/Hoe: same pattern with Planks
+- Stone/Iron/Gold/Diamond tools: same pattern, different material
+- Furnace: 8 Cobblestones (outer ring, hollow center)
+- Chest: 8 Planks (outer ring, hollow center)
+- Torch: 1 Coal + 1 Stick = 4 Torches
+- Bed: 3 Wool (same color) on top + 3 Planks on bottom
+- Bow: 3 Sticks + 3 String
+- Shield: 6 Planks + 1 Iron Ingot
+- Enchanting Table: 4 Obsidian + 2 Diamonds + 1 Book
+- Anvil: 3 Iron Blocks + 4 Iron Ingots
+- Netherite upgrade: Diamond item + Netherite Ingot in Smithing Table
 
-ORE DISTRIBUTION (Java 1.18+):
-- Coal: Y 0–256 (surface), best Y 96
-- Copper: Y -16–112, best Y 48
-- Iron: Y -64–72, best Y 16
-- Gold: Y -64–32, best Y -16 (also common in Badlands biome)
-- Lapis Lazuli: Y -64–64, best Y 0
-- Redstone: Y -64–16, best Y -59
-- Diamond: Y -64–16, best Y -59 (rarest near bedrock layer)
-- Emerald: Mountains biome only, Y -16–256
-- Ancient Debris (Netherite): Nether Y 8–22, best Y 15
-
-BLOCKS & BIOMES:
-- Wood types: Oak, Spruce, Birch, Jungle, Acacia, Dark Oak, Mangrove, Cherry, Pale Oak
-- Stone variants: Stone, Cobblestone, Deepslate (Y<0), Blackstone (Nether)
-- Overworld biomes: Plains, Forest, Taiga, Jungle, Desert, Savanna, Badlands, Snowy Plains, Swamp, Mushroom Island, Beach, Ocean, River
-- Nether biomes: Nether Wastes, Crimson Forest, Warped Forest, Soul Sand Valley, Basalt Deltas
-- End: Main island (Ender Dragon), Outer End Islands (End Cities, Elytra, Shulkers)
+ORE DEPTHS (Java 1.18+, best Y levels):
+- Coal: Y 96 (also surface), used as fuel
+- Copper: Y 48, makes spyglass, lightning rod, brush
+- Iron: Y 16, most important early game
+- Gold: Y -16, Badlands biome = more gold near surface
+- Lapis: Y 0, needed for enchanting
+- Redstone: Y -59, circuits + potions
+- Diamond: Y -59 (rare! bring iron pickaxe at minimum)
+- Emerald: Mountains only, Y 256–16, trade with villagers
+- Ancient Debris: Nether Y 15, explode-proof, make Netherite
 
 MOBS:
-- Passive: Cow, Pig, Sheep, Chicken, Horse, Donkey, Mule, Llama, Parrot, Ocelot, Bat, Squid, Glow Squid, Turtle, Axolotl, Tropical Fish, Pufferfish, Salmon, Cod, Rabbit, Fox, Strider (Nether), Hoglin (Nether)
-- Neutral: Wolf (tame with bones), Bee (honey without smoke = aggressive), Enderman (don't look at eyes), Polar Bear, Iron Golem, Piglin (wear gold to avoid aggro), Zombified Piglin, Snow Golem
-- Hostile: Zombie, Skeleton, Creeper (explodes!), Spider, Cave Spider (poisonous), Witch, Slime, Blaze (Nether, drops Blaze Rods), Ghast (Nether), Magma Cube, Endermite, Shulker, Husk (desert Zombie), Stray (snowy Skeleton), Drowned (water Zombie with Tridents), Vex, Vindicator, Pillager, Ravager, Guardian, Elder Guardian, Phantom (skips sleep), Warden (Deep Dark, strongest mob)
-- Bosses: Ender Dragon (The End, killed to unlock outer islands + credits), Wither (spawn with 4 Soul Sand/Soil T-shape + 3 Wither Skeleton Skulls)
+Passive: Cow (leather, beef), Pig (pork), Sheep (wool, mutton), Chicken (feathers, eggs, raw chicken), Rabbit, Horse/Donkey/Mule (ride), Squid (ink sac), Turtle (scutes→helmet), Axolotl (fights underwater mobs), Fox, Parrot
+Neutral: Wolf (tame with bones→loyal dog), Bee (honey, pollination), Enderman (pick up blocks, teleports, hates being looked at), Polar Bear (aggressive near cubs), Piglin (wear gold or they attack, trade with gold ingots), Iron Golem (village protector), Llama (spits when attacked)
+Hostile (spawn in dark): Zombie (drops rotten flesh, rare iron/carrot/potato), Skeleton (arrows, drops bones + arrows), Creeper (SILENT until close, then EXPLODES, drops gunpowder), Spider (can climb walls, drops string + spider eyes), Witch (throws potions), Blaze (Nether, drops Blaze Rods for brewing), Ghast (Nether, fireball), Drowned (underwater, can drop Trident), Warden (Deep Dark, STRONGEST MOB, avoid or run)
+Bosses: Ender Dragon (The End, kills with bow from ground or sword if on pillars), Wither (T-shape Soul Sand/Soil + 3 Wither Skeleton Skulls, drops Nether Star → Beacon)
 
 ENCHANTING:
-- Enchanting Table + Lapis + XP levels
-- 15 Bookshelves around table for max level 30 enchants
-- Key weapon enchants: Sharpness (extra dmg), Smite (undead dmg), Bane of Arthropods (spiders), Fire Aspect, Looting (more drops), Sweeping Edge, Knockback, Unbreaking, Mending
-- Key armor enchants: Protection, Fire Protection, Blast Protection, Projectile Protection, Thorns, Feather Falling (boots), Depth Strider/Frost Walker (boots), Respiration/Aqua Affinity (helmet), Unbreaking, Mending
-- Key tool enchants: Efficiency, Silk Touch (mines blocks intact), Fortune (more drops), Unbreaking, Mending
-- Key bow enchants: Power, Punch, Flame, Infinity, Unbreaking, Mending
-- Grindstone: removes enchants (recovers some XP). Anvil: combines enchanted items/books
+Table: needs XP levels + Lapis Lazuli. 15 Bookshelves around = max level 30.
+Weapons: Sharpness I-V, Smite (vs undead), Fire Aspect, Looting I-III, Sweeping Edge, Unbreaking, Mending
+Armor: Protection I-IV, Fire Protection, Blast Protection, Projectile Protection, Feather Falling (boots), Depth Strider/Frost Walker (boots), Respiration/Aqua Affinity (helmet), Thorns, Unbreaking, Mending  
+Tools: Efficiency I-V, Silk Touch, Fortune I-III, Unbreaking, Mending
+Bow: Power I-V, Punch I-II, Flame, Infinity, Mending
 
 POTIONS (Brewing Stand):
-- Base: Water Bottle + Nether Wart = Awkward Potion
-- Add to Awkward: Glistering Melon Slice (Healing), Sugar (Speed), Magma Cream (Fire Resistance), Rabbit's Foot (Leaping), Blaze Powder (Strength), Golden Carrot (Night Vision), Pufferfish (Water Breathing), Ghast Tear (Regeneration), Turtle Shell (Slowness)
-- Fermented Spider Eye converts: Healing→Harming, Speed→Slowness, Night Vision→Invisibility, Fire Resistance→Weakness
-- Modifiers: Redstone Dust (longer duration), Glowstone Dust (stronger effect), Gunpowder (splash potion), Dragon's Breath (lingering potion)
+Base: Water Bottle + Nether Wart = Awkward Potion
++ Glistering Melon = Healing | + Sugar = Speed | + Magma Cream = Fire Resistance
++ Rabbit's Foot = Jump Boost | + Blaze Powder = Strength | + Golden Carrot = Night Vision
++ Pufferfish = Water Breathing | + Ghast Tear = Regeneration
+Modifiers: Redstone = longer duration | Glowstone = stronger | Gunpowder = splash | Dragon's Breath = lingering
 
-REDSTONE:
-- Power sources: Lever (toggle), Button, Pressure Plate, Daylight Sensor, Observer, Tripwire Hook, Target Block, Sculk Sensor
-- Transmission: Redstone Dust (up to 15 blocks), Redstone Repeater (extends signal, adds delay), Redstone Comparator (compares/subtracts signals)
-- Logic gates: NOT = Redstone Torch behind block, AND/OR = combinations of torches
-- Outputs: Piston/Sticky Piston, Dropper, Dispenser, Door, Trapdoor, Fence Gate, Note Block, Bell, TNT, Redstone Lamp
+BUILDING MATERIALS (common builds):
+- Shelter: Wood planks, Cobblestone, Logs
+- Doors: 6 Planks (wood) or 6 Iron Ingots (iron)
+- Windows: Glass (smelt sand), Glass Panes
+- Lighting: Torches, Lanterns (1 Torch + 8 Iron Nuggets), Glowstone (Nether), Sea Lantern
+- Decoration: Stairs, Slabs, Fences, Walls, Trapdoors, Carpets, Banners
+- Redstone builds: Auto farms, Doors, Traps, Sorters, Clocks
 
-DIMENSIONS & TRAVEL:
-- Nether Portal: 4x5 frame of Obsidian minimum, lit with Flint & Steel or Fire Charge
-- 1 block Nether = 8 blocks Overworld (use for fast travel)
-- End Portal: found in Strongholds (locate with Eye of Ender), activate 12 End Portal Frames with Eyes of Ender
-- End Gateway Portal (purple): spawns after Ender Dragon kill, teleports to outer End islands
+DIMENSIONS:
+Overworld: Y -64 to 320. Sea level Y 62. Caves below Y 0.
+Nether: Enter via Obsidian portal (4x5 minimum, flint+steel). 1 block = 8 overworld blocks.
+  - Get: Blaze Rods (for brewing), Nether Wart, Quartz, Gold, Magma Cream, Ghast Tears, Soul Sand, Glowstone, Ancient Debris
+The End: End Portal in Stronghold (find with Eye of Ender thrown, follow it). Activate 12 frames with Eyes.
+  - Kill Ender Dragon to open portal home + End Gateways to outer islands (Elytra, Shulker Boxes, End Cities)
 
-SURVIVAL TIPS:
-- Never dig straight down — risk of lava/void
-- Always carry a bed to set spawn + skip night
-- Bring milk (from cows) to cure bad status effects
-- Shield blocks Skeleton arrows and Creeper blasts (craft: 6 Planks + 1 Iron Ingot)
-- A Totem of Undying (from Evokers) prevents death once
-- Eating Golden Apples gives Absorption (extra HP) and Regeneration
-- Enchanted Golden Apple (notch apple) gives even stronger buffs
+TIPS:
+- Water bucket: saves from lava, fall damage, fire
+- Milk bucket: removes ALL potion effects
+- Name Tag: names a mob so it never despawns (rename at Anvil first)
+- Leads: tie passive mobs to fences
+- Maps: find Cartographer villager for Explorer Maps to Structures
+- Never dig straight down (lava, void, cave drops)
+- Sleep in a bed to skip night AND reset spawn point
+- Kill Endermen for Ender Pearls (teleport + reach The End)
 
-=== HOW TO INTERACT WITH ME ===
-- Talk freely: I respond to all chat
-- Give orders naturally: "follow me", "go to x y z", "stop", "attack that zombie"
-- Ask Minecraft questions: "how do I make netherite?", "where do diamonds spawn?"
-- I remember our conversation so you can refer to things said earlier
+=== YOUR AUTONOMOUS DECISION PROCESS ===
+When in autonomous mode, look at your current state (health, food, inventory, position) and decide the MOST USEFUL next action.
+- If health is low: find food, retreat from combat
+- If food is low: find animals to hunt, look for crops
+- If inventory is empty: chop wood, then craft tools
+- If you have tools: mine for ores at the right depth
+- If you have iron/diamond: enchant tools, brew potions
+- Always report what you are about to do in short clear Minecraft chat
 
-Keep all my chat responses under 200 characters (Minecraft chat limit). Be concise and helpful.`;
+Keep all chat messages under 200 characters.`;
+
+    return baseIdentity;
+  }
+
+  // ─── Autonomous game loop ──────────────────────────────────────────────────
+
+  /**
+   * Start the self-play loop. Called when the bot goes ONLINE.
+   */
+  startAutonomousLoop(bot, taskManager) {
+    this._bot = bot;
+    this._taskManager = taskManager;
+    if (this._autoLoopTimer) clearInterval(this._autoLoopTimer);
+
+    this._autoLoopTimer = setInterval(() => {
+      this._autonomousTick(bot, taskManager);
+    }, AUTO_LOOP_INTERVAL_MS);
+
+    console.log(`[AIAgent][${this.username}] 🤖 Autonomous self-learning loop started (every ${AUTO_LOOP_INTERVAL_MS / 1000}s)`);
   }
 
   /**
-   * Process a chat message.
+   * Stop the autonomous loop. Called when the bot goes offline.
+   */
+  stopAutonomousLoop() {
+    if (this._autoLoopTimer) {
+      clearInterval(this._autoLoopTimer);
+      this._autoLoopTimer = null;
+    }
+  }
+
+  /**
+   * One autonomous tick: read game state → ask AI what to do → do it.
+   */
+  async _autonomousTick(bot, taskManager) {
+    if (this._isThinking) return;
+    if (!process.env.NVIDIA_API_KEY) return;
+
+    // Only act autonomously when bot is idle (no active task)
+    const activeTask = taskManager ? taskManager.getActive() : null;
+    if (activeTask) return;
+
+    this._isThinking = true;
+    try {
+      const state = this._readGameState(bot);
+
+      // Build experience context
+      const expContext = this.experienceLog.length > 0
+        ? `\nYour recent autonomous actions and results:\n${this.experienceLog.slice(-10).map(e => `- [${e.time}] Did: ${e.action} → Result: ${e.result}`).join('\n')}`
+        : '';
+
+      const stateMsg = `AUTONOMOUS TICK - Current game state:
+Position: ${state.posStr}
+Health: ${state.health}/20 | Food: ${state.food}/20
+Dimension: ${state.dimension}
+Holding: ${state.heldItem}
+Inventory: ${state.invSummary}
+Nearby players: ${state.nearbyPlayers}
+${expContext}
+
+Based on this state and your Minecraft knowledge, decide the SINGLE BEST next action to survive and progress. Use a tool to act, and explain what you're doing in 1 short sentence.`;
+
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: 'system', content: this._buildSystemPrompt('autonomous') },
+          ...this.experienceLog.slice(-5).map(e => ({ role: 'assistant', content: `I did: ${e.action}` })),
+          { role: 'user', content: stateMsg }
+        ],
+        tools: this.tools,
+        tool_choice: 'auto',
+        max_tokens: 200,
+      });
+
+      const msg = response.choices[0].message;
+      const timestamp = new Date().toLocaleTimeString();
+
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        for (const toolCall of msg.tool_calls) {
+          const fn = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          let actionStr = '';
+
+          switch (fn) {
+            case 'goto':
+            case 'mine':
+              actionStr = `!${fn} ${args.x} ${args.y} ${args.z}`;
+              break;
+            case 'follow':
+            case 'attack':
+              actionStr = `!${fn} ${args.target}`;
+              break;
+            case 'stop':
+              actionStr = `!stop`;
+              break;
+          }
+
+          if (actionStr) {
+            this.botManager.commandManager.execute(this.username, actionStr, bot);
+            const desc = msg.content || `Executed ${fn}`;
+            // Log this experience for future learning
+            this.experienceLog.push({ time: timestamp, action: `${fn}(${JSON.stringify(args)})`, result: 'dispatched' });
+            if (this.experienceLog.length > this.MAX_EXPERIENCE) {
+              this.experienceLog = this.experienceLog.slice(-this.MAX_EXPERIENCE);
+            }
+            if (desc) bot.chat(desc.slice(0, 200));
+          }
+        }
+      } else if (msg.content) {
+        // AI decided to just observe (no action) — still log it
+        this.experienceLog.push({ time: timestamp, action: 'observe', result: msg.content.slice(0, 100) });
+      }
+
+    } catch (err) {
+      console.error(`[AIAgent][${this.username}] Autonomous tick error:`, err.message);
+    } finally {
+      this._isThinking = false;
+    }
+  }
+
+  // ─── Manual chat handler ───────────────────────────────────────────────────
+
+  /**
+   * Respond to a player calling !MineFleetBot5 <message>
    */
   async handleMessage(sender, message, bot) {
     if (!process.env.NVIDIA_API_KEY) {
-      bot.chat(`Sorry ${sender}, my AI brain is missing an API key.`);
+      bot.chat(`Sorry ${sender}, NVIDIA_API_KEY is not set.`);
       return;
     }
 
-    try {
-      console.log(`[AIAgent][${this.username}] Processing from ${sender}: "${message}"`);
+    if (this._isThinking) {
+      bot.chat(`${sender}, I'm thinking right now, please wait a moment!`);
+      return;
+    }
 
-      // Add this message to conversation history (memory)
+    this._isThinking = true;
+    try {
+      console.log(`[AIAgent][${this.username}] Chat from ${sender}: "${message}"`);
+
+      // Add to conversation memory
       this.conversationHistory.push({ role: 'user', content: `${sender}: ${message}` });
       if (this.conversationHistory.length > this.MAX_HISTORY) {
         this.conversationHistory = this.conversationHistory.slice(-this.MAX_HISTORY);
@@ -217,7 +385,7 @@ Keep all my chat responses under 200 characters (Minecraft chat limit). Be conci
       const response = await this.openai.chat.completions.create({
         model: this.model,
         messages: [
-          { role: 'system', content: this._buildSystemPrompt(sender) },
+          { role: 'system', content: this._buildSystemPrompt('chat', sender) },
           ...this.conversationHistory
         ],
         tools: this.tools,
@@ -227,28 +395,26 @@ Keep all my chat responses under 200 characters (Minecraft chat limit). Be conci
 
       const responseMessage = response.choices[0].message;
 
-      // Remember the AI's reply too (for self-learning context)
+      // Save AI reply to memory
       if (responseMessage.content) {
         this.conversationHistory.push({ role: 'assistant', content: responseMessage.content });
       }
 
-      // Check if AI wants to call a tool
+      // Execute tool calls
       if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
         for (const toolCall of responseMessage.tool_calls) {
-          const functionName = toolCall.function.name;
-          const functionArgs = JSON.parse(toolCall.function.arguments);
-
-          console.log(`[AIAgent][${this.username}] Executing tool ${functionName}:`, functionArgs);
-
+          const fn = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
           let synthMsg = '';
-          switch (functionName) {
+
+          switch (fn) {
             case 'goto':
             case 'mine':
-              synthMsg = `!${functionName} ${functionArgs.x} ${functionArgs.y} ${functionArgs.z}`;
+              synthMsg = `!${fn} ${args.x} ${args.y} ${args.z}`;
               break;
             case 'follow':
             case 'attack':
-              synthMsg = `!${functionName} ${functionArgs.target}`;
+              synthMsg = `!${fn} ${args.target}`;
               break;
             case 'stop':
               synthMsg = `!stop`;
@@ -257,21 +423,28 @@ Keep all my chat responses under 200 characters (Minecraft chat limit). Be conci
 
           if (synthMsg) {
             this.botManager.commandManager.execute(sender, synthMsg, bot);
+            // Remember this action in experience log
+            this.experienceLog.push({
+              time: new Date().toLocaleTimeString(),
+              action: `${fn}(${JSON.stringify(args)}) ordered by ${sender}`,
+              result: 'dispatched'
+            });
+            if (this.experienceLog.length > this.MAX_EXPERIENCE) {
+              this.experienceLog = this.experienceLog.slice(-this.MAX_EXPERIENCE);
+            }
           }
         }
-
-        if (responseMessage.content) {
-          bot.chat(responseMessage.content.slice(0, 250));
-        } else {
-          bot.chat(`On it, ${sender}!`);
-        }
+        const reply = responseMessage.content || `On it, ${sender}!`;
+        bot.chat(reply.slice(0, 200));
       } else if (responseMessage.content) {
-        bot.chat(responseMessage.content.slice(0, 250));
+        bot.chat(responseMessage.content.slice(0, 200));
       }
 
     } catch (error) {
       console.error(`[AIAgent][${this.username}] Error:`, error.message);
-      bot.chat(`Sorry, I hit an error: ${error.message.slice(0, 100)}`);
+      bot.chat(`Error: ${error.message.slice(0, 120)}`);
+    } finally {
+      this._isThinking = false;
     }
   }
 }
