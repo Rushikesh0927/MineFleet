@@ -34,14 +34,26 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 # --------------------------------------------------------------------------
-# Step 1 — Check dependencies
+# Step 1 — Check/install dependencies
 # --------------------------------------------------------------------------
 check_deps() {
     info "Checking dependencies..."
+
+    if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        warn "QEMU not found. Installing..."
+        apt-get update -qq
+        apt-get install -y -qq qemu-system-x86 qemu-utils genisoimage sshpass
+        log "QEMU installed."
+    fi
+
+    if ! command -v sshpass >/dev/null 2>&1; then
+        apt-get install -y -qq sshpass 2>/dev/null
+    fi
+
     for cmd in qemu-system-x86_64 curl wget ssh; do
-        command -v "$cmd" >/dev/null 2>&1 || error "$cmd not found."
+        command -v "$cmd" >/dev/null 2>&1 || error "$cmd not found even after install attempt."
     done
-    log "All dependencies found."
+    log "All dependencies ready."
 }
 
 # --------------------------------------------------------------------------
