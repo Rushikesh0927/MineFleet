@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useBots, useTasks, BotStatus } from "@/lib/api";
 import { useServerContext } from "@/contexts/ServerContext";
-import { Bot, Server, Heart, Utensils, Wifi, ChevronRight, Activity, Play, Square, RotateCw, Home, Users, Loader2, Plus } from "lucide-react";
+import { Bot, Server, Heart, Utensils, Wifi, ChevronRight, Activity, Play, Square, RotateCw, Home, Users, Loader2, Plus, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -288,6 +288,9 @@ export default function Bots() {
           </div>
           <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={() => handleBulkAction('gohome')} disabled={loadingBulk === 'gohome'}>
             {loadingBulk === 'gohome' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Home className="w-3.5 h-3.5 mr-1.5" />} Go Home
+          </Button>
+          <Button size="sm" variant="destructive" className="h-8 shrink-0" onClick={() => handleBulkAction('stop-movement')} disabled={loadingBulk === 'stop-movement'}>
+            {loadingBulk === 'stop-movement' ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Ban className="w-3.5 h-3.5 mr-1.5" />} Stop Moving
           </Button>
         </div>
       </div>

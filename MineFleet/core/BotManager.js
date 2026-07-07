@@ -323,6 +323,19 @@ class BotManager {
     });
   }
 
+  /**
+   * Stops movement for all active bots, optionally filtered by serverId.
+   */
+  stopAllMovement(serverId = null) {
+    console.log(`[BotManager] Stopping movement for all bots${serverId ? ` for server ${serverId}` : ''}...`);
+    let ids = Object.keys(this.profiles);
+    if (serverId) ids = ids.filter(id => this.profiles[id].serverId === serverId);
+
+    ids.forEach(id => {
+      this.cancelTask(id);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Fleet Management — Phase 2.1 additions
   // ---------------------------------------------------------------------------

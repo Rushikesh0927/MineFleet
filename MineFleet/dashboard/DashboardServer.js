@@ -1041,6 +1041,14 @@ class DashboardServer {
       res.json({ ok: true, action: 'BULK_RESTART', timestamp: new Date().toISOString() });
     });
 
+    // POST /api/fleet/bulk/stop-movement — cancel all tasks and stop movement
+    app.post('/api/fleet/bulk/stop-movement', (req, res) => {
+      const serverId = req.query.serverId;
+      fleetLog('BULK_STOP_MOVEMENT', 'ALL', 'ALL', 'ok', { serverId });
+      this.botManager.stopAllMovement(serverId);
+      res.json({ ok: true, action: 'BULK_STOP_MOVEMENT', timestamp: new Date().toISOString() });
+    });
+
     // POST /api/fleet/bulk/follow — follow a named player with all bots (staggered)
     // Body: { target: "playerUsername" }
     app.post('/api/fleet/bulk/follow', (req, res) => {
