@@ -8,6 +8,7 @@
  * and wires OS shutdown signals (SIGINT, SIGTERM) to a graceful shutdown.
  */
 
+require('dotenv').config();
 const Application = require('./core/Application');
 
 console.log('=================================');
