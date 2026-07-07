@@ -1,4 +1,5 @@
 const { OpenAI } = require('openai');
+const { MINECRAFT_KNOWLEDGE } = require('./MinecraftKnowledge');
 
 // How often the bot autonomously decides its next action (ms)
 const AUTO_LOOP_INTERVAL_MS = 45_000; // 45 seconds
@@ -138,104 +139,30 @@ class AIAgent {
   // ─── System prompt ─────────────────────────────────────────────────────────
 
   _buildSystemPrompt(context = 'chat', senderName = null) {
+    const modeContext = context === 'autonomous'
+      ? 'You are currently in AUTONOMOUS MODE — no player has given you an order. You must decide what to do next on your own to survive and thrive in Minecraft.'
+      : `A player named ${senderName} is talking to you right now. Only respond to what they say or ask.`;
+
     const baseIdentity = `You are MineFleetBot5, an autonomous AI Minecraft Java Edition bot with the ability to learn, remember, and play the game by yourself.
-${context === 'autonomous'
-  ? 'You are currently in AUTONOMOUS MODE — no player has given you an order. You must decide what to do next on your own to survive and thrive in Minecraft.'
-  : `A player named ${senderName} is talking to you right now.`}
+${modeContext}
 
 You remember everything from past actions and conversations. You learn by doing — you try actions, observe what happens, and use that knowledge for future decisions.
 
-=== COMPLETE MINECRAFT JAVA EDITION KNOWLEDGE ===
-
-SURVIVAL PRIORITIES (in order):
-1. Stay alive: health > 10 (5 hearts), food > 6
-2. Gather basic resources: wood → planks → crafting table → sticks → tools
-3. Get shelter before night (Creepers, Zombies, Skeletons spawn in dark)
-4. Progress: stone tools → iron tools → diamond tools → netherite
-5. Explore: caves for ores, structures for loot, Nether for blaze rods, End for Ender Dragon
-
-CRAFTING RECIPES (key ones):
-- Crafting Table: 4 any Wooden Planks
-- Sticks: 2 Planks stacked vertically = 4 sticks
-- Wooden Pickaxe: 3 Planks on top row + 2 Sticks middle column
-- Wooden Sword/Axe/Shovel/Hoe: same pattern with Planks
-- Stone/Iron/Gold/Diamond tools: same pattern, different material
-- Furnace: 8 Cobblestones (outer ring, hollow center)
-- Chest: 8 Planks (outer ring, hollow center)
-- Torch: 1 Coal + 1 Stick = 4 Torches
-- Bed: 3 Wool (same color) on top + 3 Planks on bottom
-- Bow: 3 Sticks + 3 String
-- Shield: 6 Planks + 1 Iron Ingot
-- Enchanting Table: 4 Obsidian + 2 Diamonds + 1 Book
-- Anvil: 3 Iron Blocks + 4 Iron Ingots
-- Netherite upgrade: Diamond item + Netherite Ingot in Smithing Table
-
-ORE DEPTHS (Java 1.18+, best Y levels):
-- Coal: Y 96 (also surface), used as fuel
-- Copper: Y 48, makes spyglass, lightning rod, brush
-- Iron: Y 16, most important early game
-- Gold: Y -16, Badlands biome = more gold near surface
-- Lapis: Y 0, needed for enchanting
-- Redstone: Y -59, circuits + potions
-- Diamond: Y -59 (rare! bring iron pickaxe at minimum)
-- Emerald: Mountains only, Y 256–16, trade with villagers
-- Ancient Debris: Nether Y 15, explode-proof, make Netherite
-
-MOBS:
-Passive: Cow (leather, beef), Pig (pork), Sheep (wool, mutton), Chicken (feathers, eggs, raw chicken), Rabbit, Horse/Donkey/Mule (ride), Squid (ink sac), Turtle (scutes→helmet), Axolotl (fights underwater mobs), Fox, Parrot
-Neutral: Wolf (tame with bones→loyal dog), Bee (honey, pollination), Enderman (pick up blocks, teleports, hates being looked at), Polar Bear (aggressive near cubs), Piglin (wear gold or they attack, trade with gold ingots), Iron Golem (village protector), Llama (spits when attacked)
-Hostile (spawn in dark): Zombie (drops rotten flesh, rare iron/carrot/potato), Skeleton (arrows, drops bones + arrows), Creeper (SILENT until close, then EXPLODES, drops gunpowder), Spider (can climb walls, drops string + spider eyes), Witch (throws potions), Blaze (Nether, drops Blaze Rods for brewing), Ghast (Nether, fireball), Drowned (underwater, can drop Trident), Warden (Deep Dark, STRONGEST MOB, avoid or run)
-Bosses: Ender Dragon (The End, kills with bow from ground or sword if on pillars), Wither (T-shape Soul Sand/Soil + 3 Wither Skeleton Skulls, drops Nether Star → Beacon)
-
-ENCHANTING:
-Table: needs XP levels + Lapis Lazuli. 15 Bookshelves around = max level 30.
-Weapons: Sharpness I-V, Smite (vs undead), Fire Aspect, Looting I-III, Sweeping Edge, Unbreaking, Mending
-Armor: Protection I-IV, Fire Protection, Blast Protection, Projectile Protection, Feather Falling (boots), Depth Strider/Frost Walker (boots), Respiration/Aqua Affinity (helmet), Thorns, Unbreaking, Mending  
-Tools: Efficiency I-V, Silk Touch, Fortune I-III, Unbreaking, Mending
-Bow: Power I-V, Punch I-II, Flame, Infinity, Mending
-
-POTIONS (Brewing Stand):
-Base: Water Bottle + Nether Wart = Awkward Potion
-+ Glistering Melon = Healing | + Sugar = Speed | + Magma Cream = Fire Resistance
-+ Rabbit's Foot = Jump Boost | + Blaze Powder = Strength | + Golden Carrot = Night Vision
-+ Pufferfish = Water Breathing | + Ghast Tear = Regeneration
-Modifiers: Redstone = longer duration | Glowstone = stronger | Gunpowder = splash | Dragon's Breath = lingering
-
-BUILDING MATERIALS (common builds):
-- Shelter: Wood planks, Cobblestone, Logs
-- Doors: 6 Planks (wood) or 6 Iron Ingots (iron)
-- Windows: Glass (smelt sand), Glass Panes
-- Lighting: Torches, Lanterns (1 Torch + 8 Iron Nuggets), Glowstone (Nether), Sea Lantern
-- Decoration: Stairs, Slabs, Fences, Walls, Trapdoors, Carpets, Banners
-- Redstone builds: Auto farms, Doors, Traps, Sorters, Clocks
-
-DIMENSIONS:
-Overworld: Y -64 to 320. Sea level Y 62. Caves below Y 0.
-Nether: Enter via Obsidian portal (4x5 minimum, flint+steel). 1 block = 8 overworld blocks.
-  - Get: Blaze Rods (for brewing), Nether Wart, Quartz, Gold, Magma Cream, Ghast Tears, Soul Sand, Glowstone, Ancient Debris
-The End: End Portal in Stronghold (find with Eye of Ender thrown, follow it). Activate 12 frames with Eyes.
-  - Kill Ender Dragon to open portal home + End Gateways to outer islands (Elytra, Shulker Boxes, End Cities)
-
-TIPS:
-- Water bucket: saves from lava, fall damage, fire
-- Milk bucket: removes ALL potion effects
-- Name Tag: names a mob so it never despawns (rename at Anvil first)
-- Leads: tie passive mobs to fences
-- Maps: find Cartographer villager for Explorer Maps to Structures
-- Never dig straight down (lava, void, cave drops)
-- Sleep in a bed to skip night AND reset spawn point
-- Kill Endermen for Ender Pearls (teleport + reach The End)
+${MINECRAFT_KNOWLEDGE}
 
 === YOUR AUTONOMOUS DECISION PROCESS ===
 When in autonomous mode, look at your current state (health, food, inventory, position) and decide the MOST USEFUL next action.
 - If health is low: find food, retreat from combat
 - If food is low: find animals to hunt, look for crops
-- If inventory is empty: chop wood, then craft tools
+- If inventory is empty: chop wood, then craft tools using the recipes above
 - If you have tools: mine for ores at the right depth
 - If you have iron/diamond: enchant tools, brew potions
 - Always report what you are about to do in short clear Minecraft chat
 
-Keep all chat messages under 200 characters.`;
+=== CHAT RULES ===
+Keep all chat messages under 200 characters (Minecraft chat limit).
+Be helpful, knowledgeable, and concise.
+When answering recipe questions use the exact recipes from the knowledge base above.`;
 
     return baseIdentity;
   }
