@@ -65,6 +65,7 @@ class AIAgent {
     this.tools = [
       { type: 'function', function: { name: 'goto', description: 'Walk to x y z coordinates', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'follow', description: 'Follow a player by name', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
+      { type: 'function', function: { name: 'jump', description: 'Make the bot jump', parameters: { type: 'object', properties: {} } } },
       { type: 'function', function: { name: 'mine', description: 'Mine the block at x y z. You MUST be standing right next to it (within 4 blocks)! If you are far, use goto first.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'attack', description: 'Attack entity by name or "hostile" for nearest hostile', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
       { type: 'function', function: { name: 'craft', description: 'Craft an item by name (e.g. "wooden_pickaxe", "crafting_table")', parameters: { type: 'object', properties: { itemName: { type: 'string' } }, required: ['itemName'] } } },
@@ -211,7 +212,9 @@ ${this.memory.getContextForPrompt()}
 RULES:
 - Keep chat under 200 chars (Minecraft limit)
 - Talk naturally like a real player
-- ONLY use tools if you need to take a physical action (move, craft, attack, etc.). If the player is just chatting or asking a question, do NOT use any tools! Just reply with text.
+- ONLY use tools if you need to take a physical action (move, craft, attack, jump, etc.) that the user explicitly asked for.
+- Do NOT hallucinate tool calls just because you can!
+- If the player is just chatting or asking a question, do NOT use any tools! Just reply with text.
 - Think step by step — what's the best next action?
 - Learn from failures — don't repeat mistakes`;
   }
@@ -343,7 +346,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
       const msg = await this._callLLM([
         { role: 'system', content: this._buildSystemPrompt('chat', sender, ragKnowledge, state) },
         ...this.conversationHistory.slice(-8)
-      ], false); // Disable tool calls in chat mode so it doesn't hallucinate actions
+      ], true); // Allow tools in chat so it can obey commands
 
       if (msg.content) {
         this.conversationHistory.push({ role: 'assistant', content: msg.content });
@@ -369,6 +372,14 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
 
       this.memory.data.chatResponses++;
 
+      // User feels the bot "pauses" after chat because it waits 25s for next tick.
+      // We will trigger an immediate autonomous tick to resume survival goals!
+      setTimeout(() => {
+         if (this._bot && this._taskManager) {
+             this._autonomousTick(this._bot, this._taskManager);
+         }
+      }, 1000);
+
     } catch (error) {
       console.error(`[AIAgent][${this.username}] Chat error: ${error.message}`);
       this.memory.addExperience(`chat with ${sender}`, `error: ${error.message}`, false);
@@ -385,6 +396,11 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
     const mm = this.botManager.getMovementManager(id);
 
     try {
+      if (fn === 'jump') {
+        bot.setControlState('jump', true);
+        setTimeout(() => bot.setControlState('jump', false), 500);
+        return true;
+      }
       if (fn === 'goto') {
         const GotoTask = require('../tasks/GotoTask');
         if (mm) this.botManager.assignTask(id, new GotoTask(args.x, args.y, args.z, mm));
