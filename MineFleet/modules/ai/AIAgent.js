@@ -155,9 +155,13 @@ class AIAgent {
 
   async _callLLM(messages) {
     let lastError = null;
+    
+    console.log(`[AIAgent][${this.username}] Starting LLM call with fallback...`);
 
     for (const model of this.models) {
       try {
+        console.log(`[AIAgent][${this.username}] Requesting model: ${model}...`);
+        
         // We use streaming to support z-ai/glm-5.2 and handle tool accumulation manually
         const stream = await this.openai.chat.completions.create({
           model: model,
@@ -166,7 +170,7 @@ class AIAgent {
           tool_choice: 'auto',
           max_tokens: 300,
           stream: true
-        });
+        }, { timeout: 8000 }); // 8 second timeout to prevent hanging
 
         let content = '';
         let toolCalls = [];
