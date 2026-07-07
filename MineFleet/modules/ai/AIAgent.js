@@ -27,7 +27,12 @@ class AIAgent {
       apiKey: process.env.NVIDIA_API_KEY || '',
     });
 
-    this.model = 'z-ai/glm-5.2';
+    // List of models to try in order (Fallback support)
+    this.models = [
+      'z-ai/glm-5.2',                // Primary requested by user
+      'meta/llama-3.3-70b-instruct', // Powerful fallback
+      'meta/llama-3.1-8b-instruct'   // Reliable, fast fallback
+    ];
 
     // Tools available to the AI
     this.tools = [
@@ -98,8 +103,108 @@ class AIAgent {
             required: ['target']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'craft',
+          description: 'Craft an item. Provide the exact item name.',
+          parameters: {
+            type: 'object',
+            properties: { itemName: { type: 'string' } },
+            required: ['itemName']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'equip',
+          description: 'Equip an item from inventory to your hand, armor, or off-hand.',
+          parameters: {
+            type: 'object',
+            properties: { itemName: { type: 'string' }, destination: { type: 'string', description: '"hand", "head", "torso", "legs", "feet", "off-hand"' } },
+            required: ['itemName', 'destination']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'consume',
+          description: 'Eat food or drink a potion you are holding.',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'place',
+          description: 'Place the currently held block at coordinates.',
+          parameters: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } },
+            required: ['x', 'y', 'z']
+          }
+        }
       }
     ];
+  }
+
+  // ─── AI API Helper with Fallback ───────────────────────────────────────────
+
+  async _callLLM(messages) {
+    let lastError = null;
+
+    for (const model of this.models) {
+      try {
+        // We use streaming to support z-ai/glm-5.2 and handle tool accumulation manually
+        const stream = await this.openai.chat.completions.create({
+          model: model,
+          messages: messages,
+          tools: this.tools,
+          tool_choice: 'auto',
+          max_tokens: 300,
+          stream: true
+        });
+
+        let content = '';
+        let toolCalls = [];
+
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+          if (!delta) continue;
+
+          if (delta.content) {
+            content += delta.content;
+          }
+
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.id) {
+                toolCalls[tc.index] = {
+                  id: tc.id,
+                  type: tc.type,
+                  function: { name: tc.function.name, arguments: tc.function.arguments || '' }
+                };
+              } else if (tc.function && tc.function.arguments) {
+                if (toolCalls[tc.index]) {
+                  toolCalls[tc.index].function.arguments += tc.function.arguments;
+                }
+              }
+            }
+          }
+        }
+
+        toolCalls = toolCalls.filter(Boolean);
+        return { content, tool_calls: toolCalls.length > 0 ? toolCalls : null };
+      } catch (err) {
+        console.error(`[AIAgent][${this.username}] Model ${model} failed: ${err.message}. Trying next...`);
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error("All fallback models failed");
   }
 
   // ─── Game state reader ─────────────────────────────────────────────────────
@@ -225,19 +330,13 @@ ${expContext}
 
 Based on this state and your Minecraft knowledge, decide the SINGLE BEST next action to survive and progress. Use a tool to act, and explain what you're doing in 1 short sentence.`;
 
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
-        messages: [
-          { role: 'system', content: this._buildSystemPrompt('autonomous') },
-          ...this.experienceLog.slice(-5).map(e => ({ role: 'assistant', content: `I did: ${e.action}` })),
-          { role: 'user', content: stateMsg }
-        ],
-        tools: this.tools,
-        tool_choice: 'auto',
-        max_tokens: 200,
-      });
+      const responseMessage = await this._callLLM([
+        { role: 'system', content: this._buildSystemPrompt('autonomous') },
+        ...this.experienceLog.slice(-5).map(e => ({ role: 'assistant', content: `I did: ${e.action}` })),
+        { role: 'user', content: stateMsg }
+      ]);
 
-      const msg = response.choices[0].message;
+      const msg = responseMessage;
       const timestamp = new Date().toLocaleTimeString();
 
       if (msg.tool_calls && msg.tool_calls.length > 0) {
@@ -254,6 +353,18 @@ Based on this state and your Minecraft knowledge, decide the SINGLE BEST next ac
             case 'follow':
             case 'attack':
               actionStr = `!${fn} ${args.target}`;
+              break;
+            case 'place':
+              actionStr = `!place ${args.x} ${args.y} ${args.z}`;
+              break;
+            case 'craft':
+              actionStr = `!craft ${args.itemName}`;
+              break;
+            case 'equip':
+              actionStr = `!equip ${args.destination} ${args.itemName}`;
+              break;
+            case 'consume':
+              actionStr = `!consume`;
               break;
             case 'stop':
               actionStr = `!stop`;
@@ -309,18 +420,10 @@ Based on this state and your Minecraft knowledge, decide the SINGLE BEST next ac
         this.conversationHistory = this.conversationHistory.slice(-this.MAX_HISTORY);
       }
 
-      const response = await this.openai.chat.completions.create({
-        model: this.model,
-        messages: [
-          { role: 'system', content: this._buildSystemPrompt('chat', sender) },
-          ...this.conversationHistory
-        ],
-        tools: this.tools,
-        tool_choice: 'auto',
-        max_tokens: 200,
-      });
-
-      const responseMessage = response.choices[0].message;
+      const responseMessage = await this._callLLM([
+        { role: 'system', content: this._buildSystemPrompt('chat', sender) },
+        ...this.conversationHistory
+      ]);
 
       // Save AI reply to memory
       if (responseMessage.content) {
@@ -342,6 +445,18 @@ Based on this state and your Minecraft knowledge, decide the SINGLE BEST next ac
             case 'follow':
             case 'attack':
               synthMsg = `!${fn} ${args.target}`;
+              break;
+            case 'place':
+              synthMsg = `!place ${args.x} ${args.y} ${args.z}`;
+              break;
+            case 'craft':
+              synthMsg = `!craft ${args.itemName}`;
+              break;
+            case 'equip':
+              synthMsg = `!equip ${args.destination} ${args.itemName}`;
+              break;
+            case 'consume':
+              synthMsg = `!consume`;
               break;
             case 'stop':
               synthMsg = `!stop`;
