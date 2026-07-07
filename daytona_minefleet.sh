@@ -13,8 +13,8 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
-QEMU_RAM="7G"   # Leave ~1GB for Daytona host OS
-QEMU_CPU=3      # Leave 1 core for Daytona host OS
+QEMU_RAM="2G"   # 5 bots only need ~500MB — 2GB is plenty
+QEMU_CPU=2      # 2 cores is fine for Node.js bots
 VM_SSH_PORT=2222
 DISK_IMG="/tmp/ubuntu_vm.qcow2"
 CLOUD_IMG_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"

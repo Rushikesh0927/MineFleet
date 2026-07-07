@@ -2,11 +2,13 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useBots, useTasks, BotStatus } from "@/lib/api";
 import { useServerContext } from "@/contexts/ServerContext";
-import { Bot, Server, Heart, Utensils, Wifi, ChevronRight, Activity, Play, Square, RotateCw, Home, Users, Loader2 } from "lucide-react";
+import { Bot, Server, Heart, Utensils, Wifi, ChevronRight, Activity, Play, Square, RotateCw, Home, Users, Loader2, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { cls: string; label: string }> = {
@@ -137,6 +139,15 @@ export default function Bots() {
   const [loadingBulk, setLoadingBulk] = useState<string | null>(null);
   const [followTarget, setFollowTarget] = useState("");
 
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [newBot, setNewBot] = useState({
+    username: "MineFleetBot6",
+    host: "rushi161928.aternos.me",
+    port: 25565,
+    version: "1.21.1",
+  });
+  const [isAdding, setIsAdding] = useState(false);
+
   const taskMap = Object.fromEntries(
     (tasks ?? []).map(t => [t.botId, t.active?.name ?? null])
   );
@@ -166,6 +177,33 @@ export default function Bots() {
     }
   };
 
+  const handleAddBot = async () => {
+    setIsAdding(true);
+    try {
+      const payload = {
+        id: newBot.username.toLowerCase(),
+        username: newBot.username,
+        host: newBot.host,
+        port: Number(newBot.port),
+        version: newBot.version,
+        enabled: true,
+        autoReconnect: true
+      };
+      const res = await fetch('/api/fleet/bots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("Failed to add bot");
+      toast.success("Bot added successfully!");
+      setIsDialogOpen(false);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
@@ -184,6 +222,47 @@ export default function Bots() {
 
   return (
     <div className="space-y-6">
+      {/* Header with Add Bot Button */}
+      <div className="flex justify-end">
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm" className="bg-primary text-primary-foreground">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Bot
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Add New Bot</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="username" className="text-right">Username</Label>
+                <Input id="username" value={newBot.username} onChange={(e) => setNewBot({ ...newBot, username: e.target.value })} className="col-span-3" />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="host" className="text-right">Host</Label>
+                <Input id="host" value={newBot.host} onChange={(e) => setNewBot({ ...newBot, host: e.target.value })} className="col-span-3" />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="port" className="text-right">Port</Label>
+                <Input id="port" type="number" value={newBot.port} onChange={(e) => setNewBot({ ...newBot, port: Number(e.target.value) })} className="col-span-3" />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="version" className="text-right">Version</Label>
+                <Input id="version" value={newBot.version} onChange={(e) => setNewBot({ ...newBot, version: e.target.value })} className="col-span-3" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleAddBot} disabled={isAdding}>
+                {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
       {/* Bulk Action Bar */}
       <div className="bg-card border border-card-border rounded-lg p-3 flex flex-col md:flex-row items-center gap-4 shadow-sm">
         <div className="flex items-center gap-2">

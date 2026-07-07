@@ -8,7 +8,7 @@ export default function WorldMap() {
   const { activeServerId } = useServerContext();
   const { data: positions = [], isLoading, isError } = useMapPositions(activeServerId);
   
-  const [dimension, setDimension] = useState<string>("minecraft:overworld");
+  const [dimension, setDimension] = useState<string>("overworld");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, z: 0 });
 
@@ -16,7 +16,7 @@ export default function WorldMap() {
   const dimensions = useMemo(() => {
     const dims = new Set<string>();
     positions.forEach(p => dims.add(p.dimension));
-    if (dims.size === 0) dims.add("minecraft:overworld");
+    if (dims.size === 0) dims.add("overworld");
     return Array.from(dims);
   }, [positions]);
 

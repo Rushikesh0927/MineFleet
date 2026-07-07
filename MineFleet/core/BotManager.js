@@ -559,6 +559,7 @@ class BotManager {
       id,
       username:       profile.username,
       host:           profile.host,
+      server:         profile.host,
       port:           profile.port,
       status:         rt.status,
       lastSeen:       rt.lastSeen,
@@ -603,6 +604,7 @@ class BotManager {
     let health        = null;
     let food          = null;
     let dimension     = null;
+    let gameMode      = null;
     let position      = null;
     let heldItem      = null;
     let nearbyPlayers = [];
@@ -612,6 +614,7 @@ class BotManager {
       try { health    = liveBot.health ?? null; }          catch (_) {}
       try { food      = liveBot.food   ?? null; }          catch (_) {}
       try { dimension = liveBot.game?.dimension ?? null; } catch (_) {}
+      try { gameMode  = liveBot.game?.gameMode  ?? null; } catch (_) {}
 
       try {
         const pos = liveBot.entity?.position;
@@ -666,6 +669,7 @@ class BotManager {
       health,
       food,
       dimension,
+      gameMode,
       position,
       heldItem,
       nearbyPlayers,

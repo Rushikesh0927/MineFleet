@@ -946,12 +946,12 @@ class DashboardServer {
           slots,
           quickBarSlot: liveBot.quickBarSlot,
           equipment: {
-            head: liveBot.equipment[5] ? liveBot.equipment[5].name : null,
-            torso: liveBot.equipment[6] ? liveBot.equipment[6].name : null,
-            legs: liveBot.equipment[7] ? liveBot.equipment[7].name : null,
-            feet: liveBot.equipment[8] ? liveBot.equipment[8].name : null,
-            'off-hand': liveBot.equipment[45] ? liveBot.equipment[45].name : null,
-            hand: liveBot.heldItem ? liveBot.heldItem.name : null
+            head: (liveBot.inventory?.slots?.[5] || liveBot.equipment?.[5])?.name || null,
+            torso: (liveBot.inventory?.slots?.[6] || liveBot.equipment?.[6])?.name || null,
+            legs: (liveBot.inventory?.slots?.[7] || liveBot.equipment?.[7])?.name || null,
+            feet: (liveBot.inventory?.slots?.[8] || liveBot.equipment?.[8])?.name || null,
+            'off-hand': (liveBot.inventory?.slots?.[45] || liveBot.equipment?.[45])?.name || null,
+            hand: liveBot.heldItem?.name || null
           }
         });
       } catch (err) {
