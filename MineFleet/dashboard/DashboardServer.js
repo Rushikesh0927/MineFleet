@@ -299,11 +299,12 @@ class DashboardServer {
       const tasks = Object.values(this.botManager.profiles).map(profile => {
         const id = profile.id;
         const taskManager = this.botManager.taskManagers[id];
+        const mapTask = (t) => t ? { id: t.id, name: t.name, state: t.state, priority: t.priority } : null;
         return {
           botId: id,
           botUsername: profile.username,
-          active: taskManager?.activeTask || null,
-          queue: taskManager?.queue || [],
+          active: mapTask(taskManager?.activeTask) || null,
+          queue: (taskManager?.queue || []).map(mapTask),
         };
       });
 
@@ -385,11 +386,12 @@ class DashboardServer {
       };
 
       const taskManager = this.botManager.taskManagers[id];
+      const mapTask = (t) => t ? { id: t.id, name: t.name, state: t.state, priority: t.priority } : null;
       const taskObj = {
         botId: id,
         botUsername: profile.username,
-        active: taskManager?.activeTask || null,
-        queue: taskManager?.queue || [],
+        active: mapTask(taskManager?.activeTask) || null,
+        queue: (taskManager?.queue || []).map(mapTask),
       };
 
       // Broadcast single bot update (wrapping in arrays to match STATE_UPDATE schema)
