@@ -288,10 +288,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
           let args;
           try { args = JSON.parse(toolCall.function.arguments); } catch (_) { continue; }
 
-          const cmd = this._buildCommand(fn, args);
-          if (cmd) {
-            const owner = this.botManager.permissionManager.getOwner();
-            this.botManager.commandManager.execute(owner, cmd, bot);
+          if (this._dispatchAITask(fn, args, bot)) {
             this.memory.addExperience(`${fn}(${JSON.stringify(args)})`, 'dispatched', true);
             this.memory.addGoalStep(`${fn}: ${JSON.stringify(args)}`, 'executed');
 
@@ -359,10 +356,7 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
           let args;
           try { args = JSON.parse(toolCall.function.arguments); } catch (_) { continue; }
 
-          const cmd = this._buildCommand(fn, args);
-          if (cmd) {
-            const owner = this.botManager.permissionManager.getOwner();
-            this.botManager.commandManager.execute(owner, cmd, bot);
+          if (this._dispatchAITask(fn, args, bot)) {
             this.memory.addExperience(`${fn} by ${sender}`, JSON.stringify(args), true);
           }
         }
@@ -386,21 +380,49 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
 
   // ─── Build command string from tool call ─────────────────────────────────
 
-  _buildCommand(fn, args) {
-    switch (fn) {
-      case 'goto':
-      case 'mine':
-        return `!${fn} ${args.x} ${args.y} ${args.z}`;
-      case 'follow':
-      case 'attack':
-        return `!${fn} ${args.target}`;
-      case 'craft':
-        return `!craft ${args.itemName}`;
-      case 'stop':
-        return '!stop';
-      default:
-        return null;
+  _dispatchAITask(fn, args, bot) {
+    const id = bot._minefleetId;
+    const mm = this.botManager.getMovementManager(id);
+
+    try {
+      if (fn === 'goto') {
+        const GotoTask = require('../tasks/GotoTask');
+        if (mm) this.botManager.assignTask(id, new GotoTask(args.x, args.y, args.z, mm));
+        return true;
+      }
+      if (fn === 'follow') {
+        const FollowTask = require('../tasks/FollowTask');
+        const playerEntry = bot.players[args.target];
+        if (playerEntry && playerEntry.entity && mm) {
+          this.botManager.assignTask(id, new FollowTask(playerEntry.entity, args.target, mm));
+          return true;
+        }
+      }
+      if (fn === 'stop') {
+        const StopTask = require('../tasks/StopTask');
+        if (mm) this.botManager.assignTask(id, new StopTask(mm));
+        return true;
+      }
+      if (fn === 'mine' || fn === 'craft' || fn === 'attack') {
+        // For non-movement tasks, we can either use existing task classes or BotActionTask
+        // If BotActionTask or AttackTask are used:
+        if (fn === 'attack') {
+           const AttackTask = require('../tasks/AttackTask');
+           const playerEntry = bot.players[args.target];
+           if (playerEntry && playerEntry.entity) {
+             this.botManager.assignTask(id, new AttackTask(playerEntry.entity, bot));
+             return true;
+           }
+        } else {
+           const BotActionTask = require('../tasks/BotActionTask');
+           this.botManager.assignTask(id, new BotActionTask(bot, fn, args));
+           return true;
+        }
+      }
+    } catch (e) {
+      console.error(`[AIAgent] Failed to dispatch task ${fn}: ${e.message}`);
     }
+    return false;
   }
 }
 
