@@ -80,7 +80,7 @@ class CommandManager {
     const command = this.commands[commandName];
 
     if (!command) {
-      bot.chat(`Unknown command: ${COMMAND_PREFIX}${commandName}. Try ${COMMAND_PREFIX}help`);
+      console.log(`[CommandManager] Unknown command: ${COMMAND_PREFIX}${commandName} from ${sender}`);
       return;
     }
 

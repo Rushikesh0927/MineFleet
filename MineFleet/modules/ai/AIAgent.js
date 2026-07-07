@@ -27,11 +27,11 @@ class AIAgent {
       apiKey: process.env.NVIDIA_API_KEY || '',
     });
 
-    // List of models to try in order (Fallback support)
+    // We'll try these models in order if one fails
     this.models = [
-      'z-ai/glm-5.2',                // Primary requested by user
-      'meta/llama-3.3-70b-instruct', // Powerful fallback
-      'meta/llama-3.1-8b-instruct'   // Reliable, fast fallback
+      'meta/llama-3.3-70b-instruct', // Powerful fallback (promoted due to glm outage)
+      'meta/llama-3.1-8b-instruct',  // Reliable, fast fallback
+      'z-ai/glm-5.2'                 // Primary requested by user (currently degraded)
     ];
 
     // Tools available to the AI
@@ -170,7 +170,7 @@ class AIAgent {
           tool_choice: 'auto',
           max_tokens: 300,
           stream: true
-        }, { timeout: 8000 }); // 8 second timeout to prevent hanging
+        }, { timeout: 60000 }); // 60 second timeout to allow large models to respond
 
         let content = '';
         let toolCalls = [];
