@@ -206,9 +206,10 @@ class BotEngine {
     
     ConsoleBuffer.pushEvent(name, 'Reconnect', 'Creating bot instance', 'info');
 
-    if (profile.aiEnabled && AIAgent) {
+    if (id === 'bot-5' && AIAgent) {
       this.aiAgents[id] = new AIAgent(this, id, profile.username);
-    } else if (profile.aiEnabled) {
+      console.log(`[BotEngine] 🧠 AI module initialized exclusively for ${name}`);
+    } else if (id === 'bot-5') {
       console.log(`[BotEngine] ⚠️ AI enabled for ${name} but AIAgent module is missing.`);
     }
 
@@ -432,10 +433,8 @@ class BotEngine {
       if (message.startsWith('!')) {
         this.commandManager.execute(username, message, bot);
       } else if (this.aiAgents[id]) {
-        // AI intercept: trigger if the bot's username is mentioned natively
-        if (message.toLowerCase().includes(bot.username.toLowerCase())) {
-          this.aiAgents[id].handleMessage(username, message, bot);
-        }
+        // AI intercept: trigger for ALL messages if this bot has an AI agent (bot-5)
+        this.aiAgents[id].handleMessage(username, message, bot);
       }
     });
 

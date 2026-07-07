@@ -7,17 +7,17 @@ class AIAgent {
     this.username = username;
     
     // Initialize OpenAI client pointing to NVIDIA NIM API
-    const apiKey = process.env.NVIDIA_API_KEY;
+    const apiKey = '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'; // Hardcoded per user request
     if (!apiKey) {
       console.warn(`[AIAgent] WARNING: NVIDIA_API_KEY is not set. AI will not function for ${username}.`);
     }
 
     this.openai = new OpenAI({
       baseURL: 'https://integrate.api.nvidia.com/v1',
-      apiKey: apiKey || 'dummy-key-to-prevent-crash',
+      apiKey: apiKey,
     });
 
-    this.model = 'meta/llama3-70b-instruct'; // Can be configurable
+    this.model = 'z-ai/glm-5.2';
     
     // Tools available to the AI
     this.tools = [
@@ -108,10 +108,16 @@ class AIAgent {
     try {
       console.log(`[AIAgent][${this.username}] Processing request from ${sender}: "${message}"`);
       
-      const systemPrompt = `You are a Minecraft bot named ${this.username}. 
+      const systemPrompt = `You are a Minecraft Java Edition bot named ${this.username}. 
 Your master is ${sender}. 
+You are an absolute expert on Minecraft Java Edition mechanics. You possess complete knowledge about blocks, items, crafting recipes, biomes, and entities.
+Here is a quick reference of Minecraft Java Edition knowledge:
+- Crafting: Players use a 2x2 grid in their inventory or a 3x3 grid on a Crafting Table. For example, to make a Crafting Table, you need 4 Wooden Planks. To make a Pickaxe, you need 3 ingots/gems on top and 2 sticks in the middle.
+- Blocks: The world is made of blocks. Utility blocks include Furnaces (for smelting with fuel like Coal), Chests (for storage), and Redstone Dust (for circuitry).
+- Entities: Mobs can be Passive (Pigs, Cows, Sheep), Neutral (Endermen, Wolves), or Hostile (Zombies, Skeletons, Creepers). Creepers explode when near you!
+- Dimensions: Overworld, Nether, and The End.
 You are able to execute tasks in the world such as moving to coordinates, following players, mining blocks, attacking entities, and stopping your current task. 
-Use the provided tools to execute the user's requests. If a request is conversational, just reply in character. If a request requires an action, use the tool. If the action succeeds, say something like "On my way!" or "Mining now!". Keep your text responses very short and game-appropriate (under 100 characters).`;
+Use the provided tools to execute the user's requests. If a request is conversational, just reply in character, showing off your Minecraft knowledge when appropriate. If a request requires an action, use the tool. If the action succeeds, say something like "On my way!" or "Mining now!". Keep your text responses very short, game-appropriate, and under 150 characters.`;
 
       const response = await this.openai.chat.completions.create({
         model: this.model,
