@@ -42,7 +42,7 @@ check_deps() {
     if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
         warn "QEMU not found. Installing..."
         apt-get update -qq
-        apt-get install -y -qq qemu-system-x86 qemu-utils genisoimage sshpass
+        apt-get install -y -qq qemu-system-x86 qemu-utils genisoimage sshpass wget
         log "QEMU installed."
     fi
 
