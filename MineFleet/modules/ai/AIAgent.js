@@ -57,8 +57,8 @@ class AIAgent {
 
     // Model fallback chain — 70B first (with compact RAG prompt it should work now)
     this.models = [
+      'nvidia/nemotron-3-super-120b-a12b',
       'meta/llama-3.1-70b-instruct',
-      'meta/llama-3.1-8b-instruct',
     ];
 
     // Tools the AI can use to control the bot
