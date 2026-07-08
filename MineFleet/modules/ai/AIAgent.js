@@ -15,9 +15,18 @@
 
 const { OpenAI } = require('openai');
 const KnowledgeRAG = require('./KnowledgeRAG');
-const BotMemory = require('./BotMemory');
 const SpatialMemory = require('./SpatialMemory');
-const UtilityDecisionEngine = require('./UtilityDecisionEngine');
+const ExperienceDatabase = require('./ExperienceDatabase');
+const PersonalityProfile = require('./PersonalityProfile');
+const CuriosityEngine = require('./CuriosityEngine');
+const AttentionManager = require('./AttentionManager');
+const PredictionEngine = require('./PredictionEngine');
+const TacticalPlanner = require('./TacticalPlanner');
+const DynamicUtilityNetwork = require('./DynamicUtilityNetwork');
+const ContinuousLocalPlanner = require('./ContinuousLocalPlanner');
+const SelfEvaluator = require('./SelfEvaluator');
+const LearnedMovementController = require('../movement/LearnedMovementController');
+const HumanMotionModel = require('../movement/HumanMotionModel');
 
 const STRATEGY_INTERVAL_MS = 45_000; // LLM consulted every 45 seconds for strategy
 
@@ -51,13 +60,23 @@ class AIAgent {
     this.rag = new KnowledgeRAG();
 
     // Persistent memory (loads from disk)
-    this.memory = new BotMemory(username);
-
-    // Spatial memory (world map)
+    this.experienceDb = new ExperienceDatabase(username);
+    this.personality = new PersonalityProfile(username);
     this.spatial = new SpatialMemory(username);
 
-    // Continuous utility engine (created in startAutonomousLoop)
-    this.utilityEngine = null;
+    // New AI Stack
+    this.curiosity = null;
+    this.attention = null;
+    this.prediction = null;
+    this.tactical = null;
+    this.utility = null;
+    this.localPlanner = null;
+    this.evaluator = null;
+    this.movement = null;
+    this.humanizer = null;
+    
+    // Core engine loop
+    this._engineTimer = null;
 
     // NVIDIA NIM API
     this.openai = new OpenAI({
@@ -193,7 +212,7 @@ Nearby players: ${gameState.nearbyPlayers}
 Nearby mobs: ${gameState.nearbyMobs}
 World knowledge: ${spatialInfo}
 
-${this.memory.getContextForPrompt()}
+${this.experienceDb.getStrategicContext(gameState.posRaw)}
 
 Player ${senderName} is talking to you. Respond naturally.
 
@@ -213,24 +232,96 @@ RULES:
     this._bot = bot;
     this._taskManager = taskManager;
 
-    // Create Utility Decision Engine
-    this.utilityEngine = new UtilityDecisionEngine(bot, this.spatial, this.memory, this.botManager, this.botId);
-    this.utilityEngine.start();
+    // Instantiate Modules (Phase 1-12)
+    this.curiosity = new CuriosityEngine(bot, this.experienceDb, this.personality);
+    this.attention = new AttentionManager(bot, this.spatial, this.curiosity);
+    this.prediction = new PredictionEngine(bot);
+    this.tactical = new TacticalPlanner(this.experienceDb);
+    this.utility = new DynamicUtilityNetwork();
+    this.localPlanner = new ContinuousLocalPlanner(bot);
+    this.evaluator = new SelfEvaluator(this.experienceDb);
+    
+    this.movement = new LearnedMovementController(bot);
+    this.humanizer = new HumanMotionModel(bot, this.personality);
 
     // Listen for death events
     bot.on('death', () => {
-      this.memory.recordDeath('Died in game');
+      this.experienceDb.recordExperience({
+        location: bot.entity?.position,
+        category: 'death',
+        details: 'Died in game',
+        lessonLearned: 'Avoid this area when health is low.' // Simple heuristic lesson
+      });
+      // Penalize confidence
+      this.personality.drift('confidence', -0.05);
     });
 
-    // Start LLM strategy loop (every 45 seconds, just for high-level decisions)
-    this._strategyTimer = setInterval(() => {
-      this._strategyTick(bot);
-    }, STRATEGY_INTERVAL_MS);
-
-    // Initial strategy decision after 5 seconds (let the bot settle in)
+    // Start LLM strategy loop (every 45 seconds)
+    this._strategyTimer = setInterval(() => this._strategyTick(bot), STRATEGY_INTERVAL_MS);
     setTimeout(() => this._strategyTick(bot), 5000);
 
-    console.log(`[AIAgent] Autonomous engine started for ${this.username} — BehaviorEngine ticking every 1.5s, LLM strategy every 45s`);
+    // Start Fast Tick Loop (50ms - 20Hz)
+    this._engineTimer = setInterval(() => this._fastTick(), 50);
+
+    console.log(`[AIAgent] New Predictive Human-Like Architecture started for ${this.username}`);
+  }
+
+  _fastTick() {
+    if (!this._bot || !this._bot.entity) return;
+    
+    const now = Date.now();
+    // Throttle slower systems
+    const do10Hz = now % 100 < 50; // Every 100ms
+    const do5Hz = now % 200 < 50;  // Every 200ms
+    const do1Hz = now % 1000 < 50; // Every 1s
+
+    if (do10Hz) {
+      this.attention.tick();
+    }
+
+    if (do1Hz) {
+      this.curiosity.tick();
+    }
+
+    if (do5Hz) {
+      // Build World Observation
+      const obs = {
+        timestamp: now,
+        health: this._bot.health,
+        food: this._bot.food,
+        inventoryValue: this._bot.inventory.items().length,
+        threats: this.attention.queuedStimuli.filter(s => s.type === 'threat').map(s => s.data.entity),
+        interestingObjects: this.attention.queuedStimuli.filter(s => s.type === 'interesting_object').map(s => s.data),
+        recentEvents: []
+      };
+
+      // 1. Tactical Planner updates context
+      this.tactical.tick(obs);
+
+      // 2. Prediction Engine runs
+      const preds = this.prediction.predict();
+
+      // 3. Build UtilityContext
+      const ctx = {
+        observation: obs,
+        tacticalGoal: this.tactical.getGoal(),
+        personality: this.personality.get(),
+        confidence: this.personality.get().confidence,
+        recentFailures: 0,
+        recentSuccesses: 0
+      };
+
+      // 4. Utility Network scores actions
+      const bestAction = this.utility.getBestAction(ctx, preds);
+
+      // 5. Local Planner updates MicroTask
+      this.localPlanner.tick(bestAction, ctx, preds);
+    }
+
+    // Every 50ms: Movement Controller & Humanizer
+    const task = this.localPlanner.getMicroTask();
+    const cmd = this.movement.computeMovementCommand(task, {});
+    this.humanizer.apply(cmd);
   }
 
   shutdown() {
@@ -238,10 +329,11 @@ RULES:
       clearInterval(this._strategyTimer);
       this._strategyTimer = null;
     }
-    if (this.utilityEngine) {
-      this.utilityEngine.stop();
+    if (this._engineTimer) {
+      clearInterval(this._engineTimer);
+      this._engineTimer = null;
     }
-    this.memory.shutdown();
+    this.experienceDb.shutdown();
     this.spatial.shutdown();
   }
 
@@ -277,7 +369,7 @@ World: ${spatialInfo}
 Nearby: ${state.nearbyBlocks}
 Mobs: ${state.nearbyMobs}
 
-${this.memory.getContextForPrompt()}
+${this.experienceDb.getStrategicContext(state.posRaw)}
 
 Output only the JSON.`;
 
@@ -295,18 +387,17 @@ Output only the JSON.`;
 
       console.log(`[AIAgent] NEMOTRON PLAN:`, plan);
 
-      // Update goal in memory
-      if (!this.memory.data.currentGoal || this.memory.data.currentGoal.goal !== plan.current_goal) {
-        if (this.memory.data.currentGoal) this.memory.completeGoal();
-        this.memory.setGoal(plan.current_goal);
+      // Pass the Brain's target task into the Tactical Planner
+      if (this.tactical) {
+        this.tactical.setStrategicGoal(plan.next_task || 'explore');
       }
 
-      if (this.utilityEngine) {
-        // Pass the Brain's target task into the Utility Engine
-        this.utilityEngine.setBrainGoal(plan.next_task || 'explore');
-      }
-
-      this.memory.addExperience('strategy', `goal=${plan.current_goal}, task=${plan.next_task}`, true);
+      this.experienceDb.recordExperience({
+        location: state.posRaw,
+        category: 'route_success',
+        details: `Strategy update: ${plan.current_goal}`,
+        lessonLearned: null
+      });
     } catch (err) {
       console.error(`[AIAgent][${this.username}] Strategy tick error: ${err.message}`);
     } finally {
@@ -362,7 +453,7 @@ Output only the JSON.`;
         bot.chat(msg.content.slice(0, 200));
       }
 
-      this.memory.data.chatResponses++;
+      // this.memory.data.chatResponses++;
 
     } catch (error) {
       console.error(`[AIAgent][${this.username}] Chat error: ${error.message}`);
@@ -382,28 +473,28 @@ Output only the JSON.`;
         return;
       }
       if (fn === 'stop') {
-        if (this.utilityEngine) this.utilityEngine.setBrainGoal('idle');
+        if (this.tactical) this.tactical.setStrategicGoal('idle');
         return;
       }
       if (fn === 'explore') {
-        if (this.utilityEngine) this.utilityEngine.setBrainGoal('explore');
+        if (this.tactical) this.tactical.setStrategicGoal('explore');
         return;
       }
       if (fn === 'gather_wood') {
-        if (this.utilityEngine) this.utilityEngine.setBrainGoal('gather_wood');
+        if (this.tactical) this.tactical.setStrategicGoal('gather_wood');
         return;
       }
       if (fn === 'mine_stone') {
-        if (this.utilityEngine) this.utilityEngine.setBrainGoal('gather_stone');
+        if (this.tactical) this.tactical.setStrategicGoal('gather_stone');
         return;
       }
       if (fn === 'follow' || fn === 'come_here') {
         const target = args.target || sender;
-        if (this.behaviorEngine) this.behaviorEngine.setMode('follow', { target });
+        if (this.tactical) this.tactical.setStrategicGoal('follow');
         return;
       }
       if (fn === 'goto') {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('goto', { x: args.x, y: args.y, z: args.z });
+        if (this.tactical) this.tactical.setStrategicGoal('goto');
         return;
       }
     } catch (e) {
