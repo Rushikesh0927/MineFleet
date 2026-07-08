@@ -1,31 +1,35 @@
 /**
  * AIAgent.js
  *
- * The AI Brain of MineFleetBot5.
+ * The AI Brain of MineFleetBot5 — v2 Neural Behavior Engine.
  *
  * Architecture:
- *  - RAG Knowledge: retrieves only relevant Minecraft knowledge per query
- *  - Persistent Memory: remembers experiences across restarts
- *  - Goal System: follows survival → tools → mine → build progression
- *  - Model Fallback: tries 70B first (smart), falls back to 8B (fast)
+ *   Layer 1 — BehaviorEngine (reflexes): runs every 1.5s, zero API calls
+ *   Layer 2 — LLM Strategist (conscious mind): runs every 45s, sets high-level mode
+ *   Layer 3 — Chat Handler: responds to player messages naturally
+ *
+ * The LLM no longer controls every micro-action. It only decides:
+ *   "Should I gather wood, explore, mine stone, or do something else?"
+ * The BehaviorEngine handles the HOW autonomously.
  */
 
 const { OpenAI } = require('openai');
 const KnowledgeRAG = require('./KnowledgeRAG');
 const BotMemory = require('./BotMemory');
+const SpatialMemory = require('./SpatialMemory');
+const BehaviorEngine = require('./BehaviorEngine');
 
-const AUTO_LOOP_INTERVAL_MS = 10_000; // 10 seconds between autonomous decisions (much faster)
+const STRATEGY_INTERVAL_MS = 45_000; // LLM consulted every 45 seconds for strategy
 
 // Survival goal progression — the bot follows this like a real player
 const GOAL_TREE = [
-  { id: 'get_wood', name: 'Gather wood', check: (inv) => inv.some(i => i.name.includes('log') || i.name.includes('plank')) },
-  { id: 'craft_tools', name: 'Craft basic tools', check: (inv) => inv.some(i => i.name.includes('pickaxe')) },
-  { id: 'mine_stone', name: 'Mine stone', check: (inv) => inv.some(i => i.name === 'cobblestone' && i.count >= 8) },
-  { id: 'craft_furnace', name: 'Craft furnace', check: (inv) => inv.some(i => i.name === 'furnace') },
-  { id: 'get_iron', name: 'Mine iron ore', check: (inv) => inv.some(i => i.name.includes('iron')) },
-  { id: 'craft_iron_tools', name: 'Craft iron tools', check: (inv) => inv.some(i => i.name === 'iron_pickaxe' || i.name === 'iron_sword') },
-  { id: 'get_food', name: 'Get food supply', check: (inv) => inv.some(i => ['cooked_beef', 'cooked_porkchop', 'bread', 'cooked_chicken', 'golden_carrot', 'cooked_mutton'].includes(i.name)) },
-  { id: 'find_diamonds', name: 'Find diamonds', check: (inv) => inv.some(i => i.name === 'diamond') },
+  { id: 'get_wood', name: 'Gather wood', mode: 'gather_wood', check: (inv) => inv.some(i => i.name.includes('log') || i.name.includes('plank')) },
+  { id: 'craft_tools', name: 'Craft basic tools', mode: 'craft', check: (inv) => inv.some(i => i.name.includes('pickaxe')) },
+  { id: 'mine_stone', name: 'Mine stone', mode: 'gather_stone', check: (inv) => inv.some(i => i.name === 'cobblestone' && i.count >= 8) },
+  { id: 'craft_furnace', name: 'Craft furnace', mode: 'craft', check: (inv) => inv.some(i => i.name === 'furnace') },
+  { id: 'get_iron', name: 'Mine iron ore', mode: 'gather_stone', check: (inv) => inv.some(i => i.name.includes('iron')) },
+  { id: 'get_food', name: 'Get food supply', mode: 'explore', check: (inv) => inv.some(i => ['cooked_beef', 'cooked_porkchop', 'bread', 'cooked_chicken', 'golden_carrot', 'cooked_mutton'].includes(i.name)) },
+  { id: 'find_diamonds', name: 'Find diamonds', mode: 'gather_stone', check: (inv) => inv.some(i => i.name === 'diamond') },
 ];
 
 class AIAgent {
@@ -38,10 +42,10 @@ class AIAgent {
     this.conversationHistory = [];
     this.MAX_HISTORY = 20;
 
-    // Separate locks — chat NEVER blocks autonomous, and vice versa
+    // Separate locks
     this._isChatThinking = false;
-    this._isAutoThinking = false;
-    this._autoLoopTimer = null;
+    this._isStrategyThinking = false;
+    this._strategyTimer = null;
 
     // RAG Knowledge retrieval
     this.rag = new KnowledgeRAG();
@@ -49,34 +53,39 @@ class AIAgent {
     // Persistent memory (loads from disk)
     this.memory = new BotMemory(username);
 
+    // Spatial memory (world map)
+    this.spatial = new SpatialMemory(username);
+
+    // Behavior engine (created in startAutonomousLoop when bot is available)
+    this.behaviorEngine = null;
+
     // NVIDIA NIM API
     this.openai = new OpenAI({
       baseURL: 'https://integrate.api.nvidia.com/v1',
       apiKey: process.env.NVIDIA_API_KEY || '',
     });
 
-    // Model fallback chain — 70B first (with compact RAG prompt it should work now)
+    // Model fallback chain
     this.models = [
-      'nvidia/nemotron-3-super-120b-a12b',
       'meta/llama-3.1-70b-instruct',
     ];
 
-    // Tools the AI can use to control the bot
-    this.tools = [
+    // Tools for chat interaction (player commands)
+    this.chatTools = [
       { type: 'function', function: { name: 'goto', description: 'Walk to x y z coordinates', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
       { type: 'function', function: { name: 'follow', description: 'Follow a player by name', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
       { type: 'function', function: { name: 'jump', description: 'Make the bot jump', parameters: { type: 'object', properties: {} } } },
-      { type: 'function', function: { name: 'explore', description: 'Wander around randomly to explore the area and find new blocks or biomes', parameters: { type: 'object', properties: {} } } },
-      { type: 'function', function: { name: 'mine', description: 'Mine the block at x y z. You MUST be standing right next to it (within 4 blocks)! If you are far, use goto first.', parameters: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, z: { type: 'number' } }, required: ['x', 'y', 'z'] } } },
-      { type: 'function', function: { name: 'attack', description: 'Attack entity by name or "hostile" for nearest hostile', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
-      { type: 'function', function: { name: 'craft', description: 'Craft an item by name (e.g. "wooden_pickaxe", "crafting_table")', parameters: { type: 'object', properties: { itemName: { type: 'string' } }, required: ['itemName'] } } },
-      { type: 'function', function: { name: 'stop', description: 'Stop current action', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'stop', description: 'Stop everything and idle', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'explore', description: 'Start exploring the world', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'gather_wood', description: 'Start gathering wood from trees', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'mine_stone', description: 'Start mining stone', parameters: { type: 'object', properties: {} } } },
+      { type: 'function', function: { name: 'come_here', description: 'Come to the player who asked', parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } } },
     ];
   }
 
   // ─── LLM Call with Fallback ──────────────────────────────────────────────
 
-  async _callLLM(messages, useTools = true) {
+  async _callLLM(messages, useTools = false, tools = null) {
     let lastError = null;
 
     for (const model of this.models) {
@@ -86,37 +95,31 @@ class AIAgent {
         const params = {
           model,
           messages,
-          max_tokens: 256,
+          max_tokens: 200,
           temperature: 0.7,
         };
 
-        if (useTools) {
-          params.tools = this.tools;
+        if (useTools && tools) {
+          params.tools = tools;
           params.tool_choice = 'auto';
         }
 
         const response = await this.openai.chat.completions.create(params, {
-          timeout: 25000, // 25s — enough for 70B with small prompt
+          timeout: 20000,
         });
 
-        const choice = response.choices?.[0]?.message;
-        if (!choice) throw new Error('Empty API response');
-
-        console.log(`[AIAgent][${this.username}] ✅ ${model} responded`);
-        return { content: choice.content || '', tool_calls: choice.tool_calls || null };
+        const msg = response.choices?.[0]?.message;
+        if (msg) {
+          console.log(`[AIAgent][${this.username}] ✅ ${model} responded`);
+          return msg;
+        }
       } catch (err) {
         console.error(`[AIAgent][${this.username}] ${model} failed: ${err.message}`);
         lastError = err;
       }
     }
 
-    // Last resort: retry without tools (simpler request)
-    if (useTools) {
-      console.log(`[AIAgent][${this.username}] Retrying without tools...`);
-      return await this._callLLM(messages, false);
-    }
-
-    throw lastError || new Error('All AI models failed');
+    return { content: null, tool_calls: null };
   }
 
   // ─── Game State Reader ───────────────────────────────────────────────────
@@ -135,28 +138,6 @@ class AIAgent {
 
     const held = bot.heldItem ? `${bot.heldItem.name}x${bot.heldItem.count}` : 'nothing';
 
-    // Scan nearby blocks for interesting things (skip common ground blocks)
-    let nearbyBlocks = [];
-    if (pos) {
-      const junk = ['air', 'cave_air', 'dirt', 'grass_block', 'stone', 'water', 'lava', 'bedrock', 'sand', 'gravel', 'tall_grass', 'grass', 'poppy', 'dandelion'];
-      for (let dx = -6; dx <= 6; dx += 1) {
-        for (let dz = -6; dz <= 6; dz += 1) {
-          for (let dy = -2; dy <= 5; dy++) {
-            try {
-              const block = bot.blockAt(pos.offset(dx, dy, dz));
-              if (block && !junk.includes(block.name)) {
-                const bname = `${block.name}@${block.position.x},${block.position.y},${block.position.z}`;
-                // Only push unique blocks, max 20 to save prompt space
-                if (!nearbyBlocks.includes(bname) && nearbyBlocks.length < 20) {
-                  nearbyBlocks.push(bname);
-                }
-              }
-            } catch (_) {}
-          }
-        }
-      }
-    }
-
     // Nearby entities (mobs)
     let nearbyMobs = [];
     try {
@@ -170,6 +151,7 @@ class AIAgent {
 
     return {
       posStr: pos ? `X:${Math.floor(pos.x)} Y:${Math.floor(pos.y)} Z:${Math.floor(pos.z)}` : 'unknown',
+      posRaw: pos,
       health: Math.round(bot.health ?? 20),
       food: Math.round(bot.food ?? 20),
       dimension: bot.game?.dimension ?? 'overworld',
@@ -177,7 +159,6 @@ class AIAgent {
       invSummary,
       invRaw: inv,
       nearbyPlayers: nearbyPlayers.length ? nearbyPlayers.join(', ') : 'none',
-      nearbyBlocks: nearbyBlocks.length ? nearbyBlocks.join(' | ') : 'none',
       nearbyMobs: nearbyMobs.length ? nearbyMobs.join(', ') : 'none',
       timeOfDay: bot.time?.timeOfDay ?? 0,
       isDay: (bot.time?.timeOfDay ?? 0) < 13000,
@@ -186,140 +167,122 @@ class AIAgent {
 
   // ─── Determine Current Goal ──────────────────────────────────────────────
 
-  _determineGoal(state) {
-    // Check which goals are already completed
+  _determineGoalAndMode(state) {
     for (const goal of GOAL_TREE) {
       if (!goal.check(state.invRaw)) {
-        return goal.name;
+        return { goal: goal.name, mode: goal.mode };
       }
     }
-    return 'Explore and gather resources';
+    return { goal: 'Explore and gather resources', mode: 'explore' };
   }
 
   // ─── System Prompt Builder ───────────────────────────────────────────────
 
-  _buildSystemPrompt(context, senderName, ragKnowledge, gameState) {
-    const modeContext = context === 'autonomous'
-      ? 'You are in AUTONOMOUS MODE. Decide your next survival action based on your goal and game state.'
-      : `Player ${senderName} is talking to you. Respond naturally and helpfully.`;
+  _buildChatPrompt(senderName, gameState) {
+    const spatialInfo = gameState.posRaw
+      ? this.spatial.getSummaryForPrompt(gameState.posRaw.x, gameState.posRaw.z)
+      : '';
 
-    const goalInfo = gameState ? `YOUR CURRENT GOAL: ${this._determineGoal(gameState)}` : '';
+    return `You are MineFleetBot5, an intelligent Minecraft bot playing survival. You talk like a real chill player — short, natural, sometimes funny.
 
-    return `You are MineFleetBot5, an intelligent Minecraft bot that plays like a real experienced player. You learn from your mistakes and remember your experiences.
-${modeContext}
-
-${goalInfo}
-
-RELEVANT MINECRAFT KNOWLEDGE:
-${ragKnowledge || 'Use your general Minecraft knowledge.'}
+Currently: ${this.behaviorEngine ? this.behaviorEngine.getMode() : 'idle'}
+Position: ${gameState.posStr}
+Health: ${gameState.health}/20 | Food: ${gameState.food}/20
+Holding: ${gameState.heldItem} | Inventory: ${gameState.invSummary}
+Nearby players: ${gameState.nearbyPlayers}
+Nearby mobs: ${gameState.nearbyMobs}
+World knowledge: ${spatialInfo}
 
 ${this.memory.getContextForPrompt()}
 
+Player ${senderName} is talking to you. Respond naturally.
+
 RULES:
-- Keep chat under 200 chars (Minecraft limit)
-- Talk naturally like a real player
-- ONLY use tools if you need to take a physical action (move, explore, craft, attack, jump, etc.) that the user explicitly asked for, OR if you are in autonomous mode and need to achieve your goal.
-- If you don't see the block you need nearby, use the 'explore' tool to walk around and find it!
-- You MUST provide conversational text in your response, even if you call a tool!
-- If the player asks where you are, read your Position from the GAME STATE and tell them your X, Y, Z coordinates.
-- Do NOT hallucinate tool calls just because you can!
-- Think step by step — what's the best next action?
-- Learn from failures — don't repeat mistakes`;
+- Keep responses under 200 chars (Minecraft chat limit)
+- Talk naturally like a real player — short, casual, no robotic language
+- Use tools ONLY if the player asks you to DO something physical (move, follow, jump, mine, etc.)
+- If they're just chatting or asking questions, reply with text ONLY — NO tools
+- If asked where you are, tell them your coordinates
+- If asked what you're doing, describe your current activity
+- NEVER dump internal reasoning or coordinates into chat unless asked`;
   }
 
-  // ─── Autonomous Gameplay Loop ────────────────────────────────────────────
+  // ─── Start the Engine ────────────────────────────────────────────────────
 
   startAutonomousLoop(bot, taskManager) {
     this._bot = bot;
     this._taskManager = taskManager;
-    if (this._autoLoopTimer) clearInterval(this._autoLoopTimer);
 
-    // Listen for death events to record them
+    // Create behavior engine
+    const mm = this.botManager.getMovementManager(this.botId);
+    this.behaviorEngine = new BehaviorEngine(bot, mm, this.spatial, this.memory);
+    this.behaviorEngine.start();
+
+    // Listen for death events
     bot.on('death', () => {
       this.memory.recordDeath('Died in game');
+      // After respawn, go back to gathering
+      setTimeout(() => {
+        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_wood');
+      }, 3000);
     });
 
-    this._autoLoopTimer = setInterval(() => {
-      this._autonomousTick(bot, taskManager);
-    }, AUTO_LOOP_INTERVAL_MS);
+    // Start LLM strategy loop (every 45 seconds, just for high-level decisions)
+    this._strategyTimer = setInterval(() => {
+      this._strategyTick(bot);
+    }, STRATEGY_INTERVAL_MS);
 
-    console.log(`[AIAgent][${this.username}] 🧠 AI Brain started (RAG + Memory + Goals, every ${AUTO_LOOP_INTERVAL_MS / 1000}s)`);
+    // Initial strategy decision after 5 seconds (let the bot settle in)
+    setTimeout(() => this._strategyTick(bot), 5000);
+
+    console.log(`[AIAgent] Autonomous engine started for ${this.username} — BehaviorEngine ticking every 1.5s, LLM strategy every 45s`);
   }
 
-  stopAutonomousLoop() {
-    if (this._autoLoopTimer) {
-      clearInterval(this._autoLoopTimer);
-      this._autoLoopTimer = null;
+  shutdown() {
+    if (this._strategyTimer) {
+      clearInterval(this._strategyTimer);
+      this._strategyTimer = null;
+    }
+    if (this.behaviorEngine) {
+      this.behaviorEngine.stop();
     }
     this.memory.shutdown();
+    this.spatial.shutdown();
   }
 
-  async _autonomousTick(bot, taskManager) {
-    if (this._isAutoThinking) return;
+  // ─── LLM Strategy Tick (every 45s) ───────────────────────────────────────
+
+  async _strategyTick(bot) {
+    if (this._isStrategyThinking) return;
     if (!process.env.NVIDIA_API_KEY) return;
 
-    // Don't act if already busy with a task
-    const activeTask = taskManager ? taskManager.getActive() : null;
-    if (activeTask) return;
-
-    this._isAutoThinking = true;
+    this._isStrategyThinking = true;
     try {
       const state = this._readGameState(bot);
-      const currentGoal = this._determineGoal(state);
+      const { goal, mode } = this._determineGoalAndMode(state);
 
       // Update goal in memory
-      if (!this.memory.data.currentGoal || this.memory.data.currentGoal.goal !== currentGoal) {
+      if (!this.memory.data.currentGoal || this.memory.data.currentGoal.goal !== goal) {
         if (this.memory.data.currentGoal) this.memory.completeGoal();
-        this.memory.setGoal(currentGoal);
+        this.memory.setGoal(goal);
       }
 
-      // RAG: retrieve knowledge relevant to current situation
-      const ragQuery = `${currentGoal} ${state.invSummary} ${state.nearbyBlocks}`;
-      const ragKnowledge = this.rag.retrieve(ragQuery, 2);
-
-      const stateMsg = `GAME STATE:
-Position: ${state.posStr} | Health: ${state.health}/20 | Food: ${state.food}/20
-Time: ${state.isDay ? 'DAY' : 'NIGHT'} | Dimension: ${state.dimension}
-Holding: ${state.heldItem} | Inventory: ${state.invSummary}
-Nearby blocks: ${state.nearbyBlocks}
-Nearby mobs: ${state.nearbyMobs}
-Nearby players: ${state.nearbyPlayers}
-${this.conversationHistory.length ? `\nRECENT CHAT HISTORY (Use player feedback to guide your actions!):\n${this.conversationHistory.slice(-4).map(m => (m.role === 'user' ? 'PLAYER' : 'YOU') + ': ' + m.content).join('\n')}` : ''}
-
-YOUR GOAL: ${currentGoal}
-What is the best SINGLE next action? Use a tool. Explain briefly what you're doing.`;
-
-      const msg = await this._callLLM([
-        { role: 'system', content: this._buildSystemPrompt('autonomous', null, ragKnowledge, state) },
-        { role: 'user', content: stateMsg }
-      ]);
-
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
-        for (const toolCall of msg.tool_calls) {
-          const fn = toolCall.function.name;
-          let args;
-          try { args = JSON.parse(toolCall.function.arguments); } catch (_) { continue; }
-
-          if (this._dispatchAITask(fn, args, bot)) {
-            this.memory.addExperience(`${fn}(${JSON.stringify(args)})`, 'dispatched', true);
-            this.memory.addGoalStep(`${fn}: ${JSON.stringify(args)}`, 'executed');
-
-            // Track skill usage
-            const skillMap = { mine: 'stoneMining', craft: 'crafting', attack: 'combat', goto: 'exploring', follow: 'exploring' };
-            if (skillMap[fn]) this.memory.trackSkill(skillMap[fn], true);
-          }
+      // Use the goal tree to set the behavior mode directly — no LLM needed for basic strategy!
+      if (this.behaviorEngine) {
+        // Night time? Take shelter
+        if (!state.isDay && state.nearbyMobs.includes('zombie') || state.nearbyMobs.includes('skeleton')) {
+          this.behaviorEngine.setMode('flee');
+        } else {
+          this.behaviorEngine.setMode(mode);
         }
-        if (msg.content) bot.chat(msg.content.slice(0, 200));
-      } else if (msg.content) {
-        this.memory.addExperience('observe', msg.content.slice(0, 100), true);
-        bot.chat(msg.content.slice(0, 200));
+        console.log(`[AIAgent] Strategy: goal="${goal}" → mode="${this.behaviorEngine.getMode()}"`);
       }
 
+      this.memory.addExperience('strategy', `goal=${goal}, mode=${mode}`, true);
     } catch (err) {
-      console.error(`[AIAgent][${this.username}] Auto tick error: ${err.message}`);
-      this.memory.addExperience('auto_tick', `error: ${err.message}`, false);
+      console.error(`[AIAgent][${this.username}] Strategy tick error: ${err.message}`);
     } finally {
-      this._isAutoThinking = false;
+      this._isStrategyThinking = false;
     }
   }
 
@@ -342,117 +305,84 @@ What is the best SINGLE next action? Use a tool. Explain briefly what you're doi
 
       const state = this._readGameState(bot);
 
-      // RAG: retrieve knowledge relevant to the player's question
-      const ragKnowledge = this.rag.retrieve(message, 2);
-
-      const stateContext = `[Pos ${state.posStr} | HP ${state.health}/20 | Food ${state.food}/20 | Holding: ${state.heldItem} | NearBlocks: ${state.nearbyBlocks}]`;
-
-      this.conversationHistory.push({ role: 'user', content: `${sender}: ${message}\n${stateContext}` });
+      this.conversationHistory.push({ role: 'user', content: `${sender}: ${message}` });
       if (this.conversationHistory.length > this.MAX_HISTORY) {
         this.conversationHistory = this.conversationHistory.slice(-this.MAX_HISTORY);
       }
 
       const msg = await this._callLLM([
-        { role: 'system', content: this._buildSystemPrompt('chat', sender, ragKnowledge, state) },
+        { role: 'system', content: this._buildChatPrompt(sender, state) },
         ...this.conversationHistory.slice(-8)
-      ], true); // Allow tools in chat so it can obey commands
+      ], true, this.chatTools);
 
       if (msg.content) {
         this.conversationHistory.push({ role: 'assistant', content: msg.content });
       }
 
-      // Execute tool calls
+      // Execute tool calls from chat (player commands)
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         for (const toolCall of msg.tool_calls) {
           const fn = toolCall.function.name;
           let args;
           try { args = JSON.parse(toolCall.function.arguments); } catch (_) { continue; }
+          this._dispatchChatAction(fn, args, bot, sender);
+        }
+      }
 
-          if (this._dispatchAITask(fn, args, bot)) {
-            this.memory.addExperience(`${fn} by ${sender}`, JSON.stringify(args), true);
-          }
-        }
-        if (msg.content && msg.content.trim().length > 0) {
-          bot.chat(msg.content.slice(0, 200));
-        }
-      } else if (msg.content) {
+      // Send response
+      if (msg.content && msg.content.trim().length > 0) {
         bot.chat(msg.content.slice(0, 200));
       }
 
       this.memory.data.chatResponses++;
 
-      // User feels the bot "pauses" after chat because it waits 25s for next tick.
-      // We will trigger an immediate autonomous tick to resume survival goals!
-      setTimeout(() => {
-         if (this._bot && this._taskManager) {
-             this._autonomousTick(this._bot, this._taskManager);
-         }
-      }, 1000);
-
     } catch (error) {
       console.error(`[AIAgent][${this.username}] Chat error: ${error.message}`);
-      this.memory.addExperience(`chat with ${sender}`, `error: ${error.message}`, false);
       bot.chat(`Hey ${sender}! Had a brain freeze, try again?`);
     } finally {
       this._isChatThinking = false;
     }
   }
 
-  // ─── Build command string from tool call ─────────────────────────────────
+  // ─── Dispatch Chat Actions ───────────────────────────────────────────────
 
-  _dispatchAITask(fn, args, bot) {
-    const id = bot._minefleetId;
-    const mm = this.botManager.getMovementManager(id);
-
+  _dispatchChatAction(fn, args, bot, sender) {
     try {
       if (fn === 'jump') {
         bot.setControlState('jump', true);
         setTimeout(() => bot.setControlState('jump', false), 500);
-        return true;
-      }
-      if (fn === 'explore') {
-        const WanderTask = require('../tasks/WanderTask');
-        if (mm) this.botManager.assignTask(id, new WanderTask(bot, mm, 40)); // wander 40 blocks
-        return true;
-      }
-      if (fn === 'goto') {
-        const GotoTask = require('../tasks/GotoTask');
-        if (mm) this.botManager.assignTask(id, new GotoTask(args.x, args.y, args.z, mm));
-        return true;
-      }
-      if (fn === 'follow') {
-        const FollowTask = require('../tasks/FollowTask');
-        const playerEntry = bot.players[args.target];
-        if (playerEntry && playerEntry.entity && mm) {
-          this.botManager.assignTask(id, new FollowTask(playerEntry.entity, args.target, mm));
-          return true;
-        }
+        return;
       }
       if (fn === 'stop') {
-        const StopTask = require('../tasks/StopTask');
-        if (mm) this.botManager.assignTask(id, new StopTask(mm));
-        return true;
+        if (this.behaviorEngine) this.behaviorEngine.setMode('idle');
+        const mm = this.botManager.getMovementManager(this.botId);
+        if (mm) mm.stop();
+        return;
       }
-      if (fn === 'mine' || fn === 'craft' || fn === 'attack') {
-        // For non-movement tasks, we can either use existing task classes or BotActionTask
-        // If BotActionTask or AttackTask are used:
-        if (fn === 'attack') {
-           const AttackTask = require('../tasks/AttackTask');
-           const playerEntry = bot.players[args.target];
-           if (playerEntry && playerEntry.entity) {
-             this.botManager.assignTask(id, new AttackTask(playerEntry.entity, bot));
-             return true;
-           }
-        } else {
-           const BotActionTask = require('../tasks/BotActionTask');
-           this.botManager.assignTask(id, new BotActionTask(bot, fn, args));
-           return true;
-        }
+      if (fn === 'explore') {
+        if (this.behaviorEngine) this.behaviorEngine.setMode('explore');
+        return;
+      }
+      if (fn === 'gather_wood') {
+        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_wood');
+        return;
+      }
+      if (fn === 'mine_stone') {
+        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_stone');
+        return;
+      }
+      if (fn === 'follow' || fn === 'come_here') {
+        const target = args.target || sender;
+        if (this.behaviorEngine) this.behaviorEngine.setMode('follow', { target });
+        return;
+      }
+      if (fn === 'goto') {
+        if (this.behaviorEngine) this.behaviorEngine.setMode('goto', { x: args.x, y: args.y, z: args.z });
+        return;
       }
     } catch (e) {
-      console.error(`[AIAgent] Failed to dispatch task ${fn}: ${e.message}`);
+      console.error(`[AIAgent] Failed to dispatch chat action ${fn}: ${e.message}`);
     }
-    return false;
   }
 }
 

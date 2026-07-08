@@ -19,7 +19,7 @@
  */
 
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
-const { GoalBlock, GoalFollow } = goals;
+const { GoalBlock, GoalFollow, GoalNear } = goals;
 
 class MovementManager {
   constructor() {
@@ -76,6 +76,8 @@ class MovementManager {
     if (!this._assertReady('goto')) return;
 
     const movements = new Movements(this.bot);
+    movements.canDig = false;         // Don't break blocks while pathfinding
+    movements.allow1by1towers = false; // Don't build towers
     this.bot.pathfinder.setMovements(movements);
     this.bot.pathfinder.setGoal(new GoalBlock(
       Math.floor(x),
@@ -85,6 +87,28 @@ class MovementManager {
 
     this._moving = true;
     console.log(`[MovementManager] ${this.bot.username} navigating to (${x}, ${y}, ${z})`);
+  }
+
+  /**
+   * Navigates to within `range` blocks of a position (doesn't need to stand exactly on it).
+   */
+  gotoNear(x, y, z, range = 2) {
+    if (!this._assertReady('gotoNear')) return;
+
+    const movements = new Movements(this.bot);
+    movements.canDig = false;
+    movements.allow1by1towers = false;
+    movements.allowParkour = true;
+    this.bot.pathfinder.setMovements(movements);
+    this.bot.pathfinder.setGoal(new GoalNear(
+      Math.floor(x),
+      Math.floor(y),
+      Math.floor(z),
+      range,
+    ));
+
+    this._moving = true;
+    console.log(`[MovementManager] ${this.bot.username} navigating near (${x}, ${y}, ${z}) range=${range}`);
   }
 
   /**
