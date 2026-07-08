@@ -205,7 +205,7 @@ class AIAgent {
       ? this.spatial.getSummaryForPrompt(gameState.posRaw.x, gameState.posRaw.z)
       : '';
 
-    return `You are MineFleetBot5, an intelligent Minecraft bot playing survival. You talk like a real chill player — short, natural, sometimes funny.
+    return `You are MineFleetBot5, an intelligent and extremely friendly Minecraft AI. You love helping players, answering questions, and being a good companion. Always respond in a warm, polite, and friendly way!
 
 Currently: ${this.behaviorEngine ? this.behaviorEngine.getMode() : 'idle'}
 Position: ${gameState.posStr}

@@ -123,17 +123,7 @@ class TaskScheduler {
         // No active task but queue has work — start next immediately
         tm.advance();
       } else {
-        // Queue is empty. 10% chance per second to wander slightly to prevent AFK kicks
-        if (Math.random() < 0.10) {
-          const liveBot = this.botManager.botEngine?.getBot(profile.id);
-          const mm = this.botManager.getMovementManager(profile.id);
-          
-          // Only wander if not already moving, and NOT an AI bot (MineFleetBot5 is fully AI-controlled)
-          if (liveBot && mm && !mm.isMoving() && profile.username !== 'MineFleetBot5') {
-            const wanderTask = new WanderTask(liveBot, mm);
-            this.botManager.assignTask(profile.id, wanderTask);
-          }
-        }
+        // Queue is empty. We no longer wander.
       }
     }
   }
