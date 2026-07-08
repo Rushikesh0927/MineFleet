@@ -98,7 +98,7 @@ class AttentionSystem {
 
     // Rely on SpatialMemory for blocks so we don't lag the 100ms loop with block scans
     // SpatialMemory scans surroundings asynchronously
-    const nearbyPOIs = this.spatial.getPOIs();
+    const nearbyPOIs = this.spatial.data.pointsOfInterest;
     for (const poi of nearbyPOIs) {
       if (this.CURIOSITY_BLOCKS.has(poi.type)) {
         const dx = poi.x - pos.x;
