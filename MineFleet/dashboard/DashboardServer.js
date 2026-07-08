@@ -1368,8 +1368,13 @@ class DashboardServer {
     });
 
     // SPA fallback route
-    this.app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    this.app.use((req, res, next) => {
+      // Only serve index.html for GET requests that accept HTML
+      if (req.method === 'GET' && req.accepts('html')) {
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+      } else {
+        next();
+      }
     });
   }
 }
