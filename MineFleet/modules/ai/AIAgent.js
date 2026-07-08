@@ -86,7 +86,7 @@ class AIAgent {
 
     // Model fallback chain
     this.models = [
-      'meta/llama-3.1-70b-instruct',
+      'nvidia/nemotron-3-super-120b-a12b',
     ];
 
     // Tools for chat interaction (player commands)
@@ -114,8 +114,13 @@ class AIAgent {
         const params = {
           model,
           messages,
-          max_tokens: 200,
-          temperature: 0.7,
+          max_tokens: 16384,
+          temperature: 1,
+          top_p: 0.95,
+          extra_body: {
+            chat_template_kwargs: { enable_thinking: true },
+            reasoning_budget: 16384
+          }
         };
 
         if (useTools && tools) {
