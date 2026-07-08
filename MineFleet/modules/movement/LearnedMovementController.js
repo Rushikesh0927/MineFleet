@@ -64,7 +64,10 @@ class LearnedMovementController {
     }
 
     if (task.type === 'interact_block' && Math.abs(deltaYaw) < 0.2) {
-      cmd.attack = true; // left click
+      const dist = Math.sqrt(dx*dx + dz*dz + Math.pow(task.target.y - pos.y, 2));
+      if (dist < 4.5) {
+        cmd.attack = true; // left click
+      }
     }
 
     // Log the data for future ML training

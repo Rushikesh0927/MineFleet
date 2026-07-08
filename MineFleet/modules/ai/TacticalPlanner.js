@@ -27,12 +27,18 @@ class TacticalPlanner {
     let targetType = 'idle';
     let priority = 50;
 
-    if (this.strategicGoal === 'gather_wood') {
+    if (this.strategicGoal === 'gather_wood' || this.strategicGoal === 'gather_stone') {
       targetType = 'gather_resource';
       priority = 60;
     } else if (this.strategicGoal === 'explore') {
       targetType = 'explore_structure';
       priority = 40;
+    } else if (this.strategicGoal === 'follow' || this.strategicGoal === 'goto') {
+      targetType = 'follow_target';
+      priority = 80; // High priority for user commands
+    } else if (this.strategicGoal === 'idle') {
+      targetType = 'idle';
+      priority = 20;
     }
 
     this.currentTacticalGoal = {
