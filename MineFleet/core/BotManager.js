@@ -91,10 +91,10 @@ class BotManager {
     this.loadProfiles(configManager);
     this._subscribeToEvents(eventManager);
 
-    // Start only MineFleetBot4 automatically on initial startup
+    // Start enabled bots automatically on initial startup
     let index = 0;
     for (const profile of this.getProfiles()) {
-      if (profile.enabled && profile.username === 'MineFleetBot4') {
+      if (profile.enabled) {
         this._scheduleInitialStart(profile.id, index);
         index++;
       }
