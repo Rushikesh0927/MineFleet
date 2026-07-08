@@ -1366,6 +1366,11 @@ class DashboardServer {
       fleetLog('PROFILE_DEPLOY', 'SYSTEM', 'SYSTEM', 'ok', { profileId: req.params.id, name: profile.name, scheduled, skipped });
       res.json({ ok: true, scheduled, skipped });
     });
+
+    // SPA fallback route
+    this.app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    });
   }
 }
 
