@@ -142,19 +142,18 @@ class MovementManager {
   }
 
   /**
-   * Rotates the bot's head to face the given world position.
-   * This is a direct look operation — not pathfinder-based.
+   * Rotates the bot's head to face the given world position smoothly like a human.
    *
    * @param {number} x
    * @param {number} y
    * @param {number} z
    */
-  lookAt(x, y, z) {
+  async lookAt(x, y, z) {
     if (!this._assertReady('lookAt')) return;
 
-    // Mineflayer's lookAt accepts any object with x, y, z
-    this.bot.lookAt({ x, y, z });
-    console.log(`[MovementManager] ${this.bot.username} looking at (${x}, ${y}, ${z})`);
+    const Humanizer = require('./Humanizer');
+    console.log(`[MovementManager] ${this.bot.username} smoothly looking at (${x}, ${y}, ${z})`);
+    await Humanizer.smoothLook(this.bot, { x, y, z });
   }
 
   /**

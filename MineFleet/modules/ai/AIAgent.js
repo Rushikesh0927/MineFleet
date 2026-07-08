@@ -259,26 +259,59 @@ RULES:
     this._isStrategyThinking = true;
     try {
       const state = this._readGameState(bot);
-      const { goal, mode } = this._determineGoalAndMode(state);
+      const spatialInfo = state.posRaw
+        ? this.spatial.getSummaryForPrompt(state.posRaw.x, state.posRaw.z)
+        : '';
+
+      const prompt = `You are the Brain (High-Level Intelligence) of a Minecraft AI player.
+Your reasoning engine must output a structured JSON plan. Do NOT output raw text.
+Output EXACTLY valid JSON matching this schema:
+{
+  "current_goal": "Collect wood",
+  "reasoning": "Need wood to craft tools.",
+  "next_task": "gather_wood", 
+  "expected_result": "Have enough wood for a crafting table"
+}
+
+Valid "next_task" values: [gather_wood, gather_stone, explore, eat, flee, craft, shelter, idle]
+
+Current State:
+Health: ${state.health}/20 | Food: ${state.food}/20
+Holding: ${state.heldItem} | Inventory: ${state.invSummary}
+World: ${spatialInfo}
+Nearby: ${state.nearbyBlocks}
+Mobs: ${state.nearbyMobs}
+
+${this.memory.getContextForPrompt()}
+
+Output only the JSON.`;
+
+      const msg = await this._callLLM([{ role: 'user', content: prompt }]);
+      
+      let plan;
+      try {
+        // Strip markdown code blocks if the model outputs them
+        const rawJson = msg.content.replace(/```json/g, '').replace(/```/g, '').trim();
+        plan = JSON.parse(rawJson);
+      } catch (err) {
+        console.error(`[AIAgent] Failed to parse Nemotron JSON:`, err.message);
+        plan = { current_goal: 'Explore', next_task: 'explore' };
+      }
+
+      console.log(`[AIAgent] NEMOTRON PLAN:`, plan);
 
       // Update goal in memory
-      if (!this.memory.data.currentGoal || this.memory.data.currentGoal.goal !== goal) {
+      if (!this.memory.data.currentGoal || this.memory.data.currentGoal.goal !== plan.current_goal) {
         if (this.memory.data.currentGoal) this.memory.completeGoal();
-        this.memory.setGoal(goal);
+        this.memory.setGoal(plan.current_goal);
       }
 
-      // Use the goal tree to set the behavior mode directly — no LLM needed for basic strategy!
       if (this.behaviorEngine) {
-        // Night time? Take shelter
-        if (!state.isDay && state.nearbyMobs.includes('zombie') || state.nearbyMobs.includes('skeleton')) {
-          this.behaviorEngine.setMode('flee');
-        } else {
-          this.behaviorEngine.setMode(mode);
-        }
-        console.log(`[AIAgent] Strategy: goal="${goal}" → mode="${this.behaviorEngine.getMode()}"`);
+        // Emergency overrides still apply at the low level, but we pass the brain's task
+        this.behaviorEngine.setMode(plan.next_task || 'explore');
       }
 
-      this.memory.addExperience('strategy', `goal=${goal}, mode=${mode}`, true);
+      this.memory.addExperience('strategy', `goal=${plan.current_goal}, task=${plan.next_task}`, true);
     } catch (err) {
       console.error(`[AIAgent][${this.username}] Strategy tick error: ${err.message}`);
     } finally {

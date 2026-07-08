@@ -18,6 +18,7 @@
 const { Vec3 } = require('vec3');
 const { goals: { GoalNear, GoalBlock, GoalFollow } } = require('mineflayer-pathfinder');
 const { Movements } = require('mineflayer-pathfinder');
+const Humanizer = require('../movement/Humanizer');
 
 const TICK_MS = 1500; // Run behavior every 1.5 seconds
 const REACH_DISTANCE = 4; // Blocks within reach for mining
@@ -377,6 +378,7 @@ class BehaviorEngine {
       const recipe = this.bot.recipesFor(this.bot.registry.itemsByName[itemName]?.id, null, 1, null);
       
       if (recipe.length > 0) {
+        await Humanizer.randomDelay(400, 1000); // Look around/think before crafting
         await this.bot.craft(recipe[0], 1, null);
         console.log(`[BehaviorEngine] Crafted ${itemName}!`);
         this.memory.addExperience(`crafted ${itemName}`, 'success', true);
@@ -522,9 +524,9 @@ class BehaviorEngine {
     const dx = (Math.random() - 0.5) * 6;
     const dz = (Math.random() - 0.5) * 6;
 
-    // Look at a random nearby point
+    // Look at a random nearby point smoothly
     try {
-      this.bot.lookAt(new Vec3(pos.x + dx * 3, pos.y + 1, pos.z + dz * 3));
+      await Humanizer.smoothLook(this.bot, new Vec3(pos.x + dx * 3, pos.y + 1, pos.z + dz * 3));
     } catch (_) {}
 
     // Auto-transition to explore after a few idle ticks
@@ -548,6 +550,10 @@ class BehaviorEngine {
     this._isDigging = true;
     try {
       if (this.bot.canDigBlock(block)) {
+        // Look smoothly at the block before mining, simulating human aim
+        await Humanizer.smoothLook(this.bot, block.position.offset(0.5, 0.5, 0.5));
+        await Humanizer.randomDelay(300, 600); // Slight pause before hitting
+
         console.log(`[BehaviorEngine] Mining ${block.name} at ${block.position.x},${block.position.y},${block.position.z}`);
         await this.bot.dig(block);
         this.memory.addExperience(`mined ${block.name}`, `at ${block.position.x},${block.position.y},${block.position.z}`, true);
