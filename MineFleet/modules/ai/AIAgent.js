@@ -17,7 +17,7 @@ const { OpenAI } = require('openai');
 const KnowledgeRAG = require('./KnowledgeRAG');
 const BotMemory = require('./BotMemory');
 const SpatialMemory = require('./SpatialMemory');
-const BehaviorEngine = require('./BehaviorEngine');
+const UtilityDecisionEngine = require('./UtilityDecisionEngine');
 
 const STRATEGY_INTERVAL_MS = 45_000; // LLM consulted every 45 seconds for strategy
 
@@ -56,8 +56,8 @@ class AIAgent {
     // Spatial memory (world map)
     this.spatial = new SpatialMemory(username);
 
-    // Behavior engine (created in startAutonomousLoop when bot is available)
-    this.behaviorEngine = null;
+    // Continuous utility engine (created in startAutonomousLoop)
+    this.utilityEngine = null;
 
     // NVIDIA NIM API
     this.openai = new OpenAI({
@@ -213,18 +213,13 @@ RULES:
     this._bot = bot;
     this._taskManager = taskManager;
 
-    // Create behavior engine
-    const mm = this.botManager.getMovementManager(this.botId);
-    this.behaviorEngine = new BehaviorEngine(bot, mm, this.spatial, this.memory);
-    this.behaviorEngine.start();
+    // Create Utility Decision Engine
+    this.utilityEngine = new UtilityDecisionEngine(bot, this.spatial, this.memory, this.botManager, this.botId);
+    this.utilityEngine.start();
 
     // Listen for death events
     bot.on('death', () => {
       this.memory.recordDeath('Died in game');
-      // After respawn, go back to gathering
-      setTimeout(() => {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_wood');
-      }, 3000);
     });
 
     // Start LLM strategy loop (every 45 seconds, just for high-level decisions)
@@ -243,8 +238,8 @@ RULES:
       clearInterval(this._strategyTimer);
       this._strategyTimer = null;
     }
-    if (this.behaviorEngine) {
-      this.behaviorEngine.stop();
+    if (this.utilityEngine) {
+      this.utilityEngine.stop();
     }
     this.memory.shutdown();
     this.spatial.shutdown();
@@ -306,9 +301,9 @@ Output only the JSON.`;
         this.memory.setGoal(plan.current_goal);
       }
 
-      if (this.behaviorEngine) {
-        // Emergency overrides still apply at the low level, but we pass the brain's task
-        this.behaviorEngine.setMode(plan.next_task || 'explore');
+      if (this.utilityEngine) {
+        // Pass the Brain's target task into the Utility Engine
+        this.utilityEngine.setBrainGoal(plan.next_task || 'explore');
       }
 
       this.memory.addExperience('strategy', `goal=${plan.current_goal}, task=${plan.next_task}`, true);
@@ -387,21 +382,19 @@ Output only the JSON.`;
         return;
       }
       if (fn === 'stop') {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('idle');
-        const mm = this.botManager.getMovementManager(this.botId);
-        if (mm) mm.stop();
+        if (this.utilityEngine) this.utilityEngine.setBrainGoal('idle');
         return;
       }
       if (fn === 'explore') {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('explore');
+        if (this.utilityEngine) this.utilityEngine.setBrainGoal('explore');
         return;
       }
       if (fn === 'gather_wood') {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_wood');
+        if (this.utilityEngine) this.utilityEngine.setBrainGoal('gather_wood');
         return;
       }
       if (fn === 'mine_stone') {
-        if (this.behaviorEngine) this.behaviorEngine.setMode('gather_stone');
+        if (this.utilityEngine) this.utilityEngine.setBrainGoal('gather_stone');
         return;
       }
       if (fn === 'follow' || fn === 'come_here') {
