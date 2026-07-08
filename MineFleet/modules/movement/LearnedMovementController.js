@@ -26,47 +26,49 @@ class LearnedMovementController {
     };
 
     if (!task || task.type === 'idle' || !task.target) {
+      if (this.bot.movementManager && this.bot.movementManager.isMoving()) {
+        this.bot.movementManager.stop();
+      }
       return cmd; // Stand still
     }
 
     const pos = this.bot.entity.position;
 
-    // Calculate desired angles
-    const dx = task.target.x - pos.x;
-    const dz = task.target.z - pos.z;
-    const targetYaw = Math.atan2(-dx, -dz);
-    
-    let deltaYaw = targetYaw - this.bot.entity.yaw;
-    while (deltaYaw < -Math.PI) deltaYaw += Math.PI * 2;
-    while (deltaYaw > Math.PI) deltaYaw -= Math.PI * 2;
-
-    cmd.mouseXDelta = deltaYaw;
-
-    // Pitch logic for aiming at blocks
-    if (task.type === 'interact_block' || task.type === 'attack_entity') {
-      const dy = task.target.y - (pos.y + this.bot.entity.height);
-      const targetPitch = Math.atan2(dy, Math.sqrt(dx*dx + dz*dz));
-      cmd.mouseYDelta = targetPitch - this.bot.entity.pitch;
+    if (task.type === 'move_to' || task.type === 'interact_block') {
+       if (this.bot.movementManager) {
+          const tx = Math.floor(task.target.x);
+          const ty = Math.floor(task.target.y);
+          const tz = Math.floor(task.target.z);
+          
+          if (!this.lastTarget || this.lastTarget.x !== tx || this.lastTarget.y !== ty || this.lastTarget.z !== tz) {
+             if (task.type === 'interact_block') {
+                 this.bot.movementManager.gotoNear(tx, ty, tz, 2);
+             } else {
+                 this.bot.movementManager.goto(tx, ty, tz);
+             }
+             this.lastTarget = { x: tx, y: ty, z: tz };
+          }
+       }
     }
 
-    // Forward logic if facing mostly the right way
-    if (Math.abs(deltaYaw) < 0.5) {
-      cmd.forward = true;
-      if (task.id.startsWith('flee')) cmd.sprint = true;
-
-      // Basic jump logic (raycast)
-      const forwardVec = new Vec3(Math.sin(-this.bot.entity.yaw), 0, Math.cos(-this.bot.entity.yaw));
-      const blockAhead = this.bot.blockAt(pos.offset(forwardVec.x, 0, forwardVec.z));
-      const blockAboveAhead = this.bot.blockAt(pos.offset(forwardVec.x, 1, forwardVec.z));
-      if (blockAhead && blockAhead.name !== 'air' && blockAboveAhead && blockAboveAhead.name === 'air') {
-         cmd.jump = true;
-      }
-    }
-
-    if (task.type === 'interact_block' && Math.abs(deltaYaw) < 0.2) {
-      const dist = Math.sqrt(dx*dx + dz*dz + Math.pow(task.target.y - pos.y, 2));
-      if (dist < 4.5) {
-        cmd.attack = true; // left click
+    // Only attack if we are close enough and NOT currently pathfinding (arrived)
+    if (task.type === 'interact_block') {
+      const dist = Math.sqrt(Math.pow(task.target.x - pos.x, 2) + Math.pow(task.target.z - pos.z, 2) + Math.pow(task.target.y - pos.y, 2));
+      const isMoving = this.bot.movementManager ? this.bot.movementManager.isMoving() : false;
+      
+      if (dist < 4.5 && !isMoving) {
+         const dx = task.target.x - pos.x;
+         const dz = task.target.z - pos.z;
+         const targetYaw = Math.atan2(-dx, -dz);
+         let deltaYaw = targetYaw - this.bot.entity.yaw;
+         while (deltaYaw < -Math.PI) deltaYaw += Math.PI * 2;
+         while (deltaYaw > Math.PI) deltaYaw -= Math.PI * 2;
+         
+         cmd.mouseXDelta = deltaYaw;
+         
+         if (Math.abs(deltaYaw) < 0.2) {
+             cmd.attack = true;
+         }
       }
     }
 

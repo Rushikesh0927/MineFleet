@@ -240,6 +240,7 @@ class BotEngine {
     const mm = new MovementManager();
     mm.initialize(bot);
     this.movementManagers[id] = mm;
+    bot.movementManager = mm;
 
     // Delegate lifecycle logging + platform event emissions to EventManager
     this.eventManager.register(bot, profile);
